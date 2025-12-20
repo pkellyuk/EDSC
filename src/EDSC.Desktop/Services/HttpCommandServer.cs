@@ -290,12 +290,12 @@ namespace EDSC.Desktop.Services
     }
     .btn .icon {
       display: block;
-      height: 28px;
+      height: 56px;
       margin: 0 auto 6px auto;
     }
     .btn .icon svg {
-      width: 28px;
-      height: 28px;
+      width: 56px;
+      height: 56px;
       display: block;
     }
     .btn small {
@@ -396,8 +396,9 @@ namespace EDSC.Desktop.Services
             const btn = document.createElement('button');
             btn.className = 'btn';
             btn.style.background = button.color || '#4caf50';
-            btn.style.width = (button.size || 80) + 'px';
-            btn.style.height = (button.size || 80) + 'px';
+            const buttonSize = (button.size || 80) * 1.6;
+            btn.style.width = buttonSize + 'px';
+            btn.style.height = buttonSize + 'px';
             const iconWrap = document.createElement('div');
             iconWrap.className = 'icon';
             if (button.iconSvg) {

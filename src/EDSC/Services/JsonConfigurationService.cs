@@ -373,6 +373,28 @@ namespace EDSC.Services
                     },
                     new ButtonConfig
                     {
+                        Id = "return",
+                        Key = "BACK",
+                        Icon = "keyboard_return",
+                        IconSvg = "return.svg",
+                        Color = "#374151",
+                        Label = "Return",
+                        Category = "Panels",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "escape",
+                        Key = "ESCAPE",
+                        Icon = "close",
+                        IconSvg = "escape.svg",
+                        Color = "#374151",
+                        Label = "Escape",
+                        Category = "Panels",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
                         Id = "quickcomms",
                         Key = "ENTER",
                         Icon = "sms",

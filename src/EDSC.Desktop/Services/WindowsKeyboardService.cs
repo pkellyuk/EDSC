@@ -20,6 +20,7 @@ namespace EDSC.Desktop.Services
         private const uint KeyEventFlagScanCode = 0x0008;
         private const uint MapVkToVsc = 0x0000;
         private const string LogFileName = "edsc.keyboard.log";
+        private const int LongPressDelayMs = 80;
 
         private readonly InputSimulator _simulator;
         private static readonly object LogLock = new object();
@@ -33,7 +34,7 @@ namespace EDSC.Desktop.Services
             Debug.WriteLine("[WindowsKeyboardService] Exit: Constructor");
         }
 
-        public Task SendKeyPressAsync(string key)
+        public async Task SendKeyPressAsync(string key)
         {
             Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyPressAsync(key={key})");
             LogToFile($"Entry: SendKeyPressAsync key={key}");
@@ -41,7 +42,7 @@ namespace EDSC.Desktop.Services
             if (string.IsNullOrEmpty(key))
             {
                 Debug.WriteLine("[WindowsKeyboardService] Key is null or empty");
-                return Task.CompletedTask;
+                return;
             }
 
             try
@@ -51,18 +52,31 @@ namespace EDSC.Desktop.Services
                 if (virtualKey == null)
                 {
                     Debug.WriteLine($"[WindowsKeyboardService] Failed to parse key: {key}");
-                    return Task.CompletedTask;
+                    return;
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Pressing key {key} (VK code: {virtualKey})");
                 LogToFile($"Pressing key {key} (VK code: {virtualKey})");
+
+                Debug.WriteLine($"[WindowsKeyboardService] Using long press for key {key}");
+                LogToFile($"Long press key={key} delayMs={LongPressDelayMs}");
+
                 var downSent = TrySendInput(virtualKey.Value, keyUp: false);
-                var upSent = TrySendInput(virtualKey.Value, keyUp: true);
-                if (!downSent || !upSent)
+                if (!downSent)
                 {
-                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key press: {key}");
-                    LogToFile($"Fallback InputSimulator KeyPress key={key}");
-                    _simulator.Keyboard.KeyPress(virtualKey.Value);
+                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key down: {key}");
+                    LogToFile($"Fallback InputSimulator KeyDown key={key}");
+                    _simulator.Keyboard.KeyDown(virtualKey.Value);
+                }
+
+                await Task.Delay(LongPressDelayMs);
+
+                var upSent = TrySendInput(virtualKey.Value, keyUp: true);
+                if (!upSent)
+                {
+                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key up: {key}");
+                    LogToFile($"Fallback InputSimulator KeyUp key={key}");
+                    _simulator.Keyboard.KeyUp(virtualKey.Value);
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key {key} pressed successfully");
@@ -76,7 +90,7 @@ namespace EDSC.Desktop.Services
 
             Debug.WriteLine("[WindowsKeyboardService] Exit: SendKeyPressAsync");
             LogToFile("Exit: SendKeyPressAsync");
-            return Task.CompletedTask;
+            return;
         }
 
         public Task SendKeyDownAsync(string key)
@@ -179,6 +193,14 @@ namespace EDSC.Desktop.Services
 
             try
             {
+                if (key.Length == 1 && char.IsDigit(key[0]))
+                {
+                    var digitValue = key[0] - '0';
+                    var digitKey = VirtualKeyCode.VK_0 + digitValue;
+                    Debug.WriteLine($"[WindowsKeyboardService] Digit match: {key} -> {digitKey}");
+                    return digitKey;
+                }
+
                 // Try to parse as enum directly (e.g., "F1", "Escape", "A")
                 if (Enum.TryParse<VirtualKeyCode>(key, true, out var directMatch))
                 {
@@ -268,6 +290,16 @@ namespace EDSC.Desktop.Services
             {
                 Debug.WriteLine($"[WindowsKeyboardService] SendInput failed (win32={Marshal.GetLastWin32Error()})");
                 LogToFile($"SendInput failed (win32={Marshal.GetLastWin32Error()})");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool RequiresLongPress(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
                 return false;
             }
 

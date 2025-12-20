@@ -283,6 +283,26 @@
       "icon": "shield",
       "iconSvg": "shieldbooster.svg",
       "category": "Combat"
+    },
+    {
+      "size": 80,
+      "id": "return",
+      "color": "#374151",
+      "iconSvg": "return.svg",
+      "category": "Panels",
+      "label": "Return",
+      "key": "BACK",
+      "icon": "keyboard_return"
+    },
+    {
+      "size": 80,
+      "id": "escape",
+      "color": "#374151",
+      "iconSvg": "escape.svg",
+      "category": "Panels",
+      "label": "Escape",
+      "key": "ESCAPE",
+      "icon": "close"
     }
   ]
 }
