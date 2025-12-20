@@ -21,7 +21,7 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 - QR code web UI (no mobile app required)
 - HTTP command server on port 9000
 - Keyboard simulation for Elite Dangerous
-- JSON configuration for buttons
+- JSON configuration for buttons (categories + SVG icons)
 - IP selector to choose the correct local address
 
 ## Quick Start
@@ -45,6 +45,22 @@ info: Application started
 The button layout is stored in `config.json` (tracked in this repo). The desktop app reads it from:
 
 `src/EDSC.Desktop/bin/Debug/net8.0-windows/config.json`
+
+Buttons support categories and SVG icons for the web UI. Example:
+
+```json
+{
+  "id": "hardpoints",
+  "key": "U",
+  "label": "Hardpoints",
+  "category": "Combat",
+  "iconSvg": "hardpoints.svg",
+  "color": "#6B7280",
+  "size": 80
+}
+```
+
+SVG icons are served from `src/EDSC.Desktop/Assets/Icons` and are copied to the output on build.
 
 Copy it there if needed:
 
@@ -96,6 +112,8 @@ Open in a phone browser:
 http://<pc-ip>:9000/web
 ```
 
+The web UI groups buttons by category and shows SVG icons above the labels. It also includes a Fullscreen toggle in the toolbar.
+
 ## Troubleshooting
 
 **Web UI does not load**
@@ -103,6 +121,9 @@ http://<pc-ip>:9000/web
 - Pick the correct IP in the desktop app
 - Allow TCP port 9000 in Windows Firewall
 - Test `http://PC_IP:9000/web` in a desktop browser
+
+**Buttons not triggering reliably**
+- Some games need longer key presses; the desktop app uses a short long-press (down → delay → up) by default.
 
 ## Security Considerations
 
