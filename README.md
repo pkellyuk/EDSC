@@ -83,6 +83,8 @@ EDSC/
 ?? src/
 ?  ?? EDSC/                      # Shared models and view models
 ?  ?? EDSC.Desktop/              # Desktop app + HTTP server
+?? installer/
+?  ?? EDSC.iss                   # Inno Setup installer script
 ```
 
 ## API Reference
@@ -124,6 +126,22 @@ The web UI groups buttons by category and shows SVG icons above the labels. It a
 
 **Buttons not triggering reliably**
 - Some games need longer key presses; the desktop app uses a short long-press (down → delay → up) by default.
+
+## Installer (EXE)
+
+This repo includes an Inno Setup script for a classic unsigned EXE installer (no Appx/MSIX signing required).
+
+1) Publish the desktop app:
+```powershell
+dotnet publish src/EDSC.Desktop/EDSC.Desktop.csproj -c Release -r win-x64 --self-contained true
+```
+
+2) Build the installer with Inno Setup:
+```powershell
+iscc installer/EDSC.iss
+```
+
+The output EXE is written to `installer/EDSC-Setup.exe`.
 
 ## Security Considerations
 
