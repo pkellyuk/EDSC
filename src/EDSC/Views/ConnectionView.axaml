@@ -8,7 +8,6 @@
              x:DataType="vm:ConnectionViewModel">
 
     <Design.DataContext>
-        <!-- Design-time data context for preview -->
         <vm:ConnectionViewModel />
     </Design.DataContext>
 
@@ -22,155 +21,82 @@
                        TextAlignment="Center"
                        Margin="0,10,0,0"/>
 
-            <TextBlock Text="Server Connection"
+            <TextBlock Text="Web Control"
                        FontSize="20"
                        FontWeight="Bold"
                        Margin="0,10,0,0"/>
 
             <!-- Status Message -->
-            <Border Background="#F0F0F0"
+            <Border Background="#1F2937"
                     Padding="10"
                     CornerRadius="5"
-                    IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}">
                 <TextBlock Text="{Binding StatusMessage}"
                            TextWrapping="Wrap"
-                           FontSize="14"/>
+                           FontSize="14"
+                           Foreground="#F9FAFB"/>
             </Border>
 
-            <!-- Discovery Section -->
-            <StackPanel Spacing="10">
-                <TextBlock Text="Automatic Discovery"
-                           FontSize="16"
-                           FontWeight="SemiBold"/>
-
-                <Button Command="{Binding DiscoverServersCommand}"
-                        IsEnabled="{Binding !IsDiscovering}"
-                        HorizontalAlignment="Stretch"
-                        Padding="15,10"
-                        Background="#2196F3"
-                        Foreground="White"
-                        CornerRadius="5">
-                    <TextBlock Text="🔍 Discover Servers"
-                               VerticalAlignment="Center"/>
-                </Button>
-            </StackPanel>
-
-            <!-- Discovered Servers List -->
-            <StackPanel Spacing="10"
-                       IsVisible="{Binding HasDiscoveredServers}">
-                <TextBlock Text="Discovered Servers"
-                           FontSize="16"
-                           FontWeight="SemiBold"/>
-
-                <Border BorderBrush="#CCCCCC"
-                        BorderThickness="1"
-                        CornerRadius="5"
-                        Padding="5">
-                    <ListBox ItemsSource="{Binding DiscoveredServers}"
-                             SelectedItem="{Binding SelectedServer}"
-                             MinHeight="100"
-                             MaxHeight="200"
-                             Background="White">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border Padding="10"
-                                       Margin="2"
-                                       Background="#F9F9F9"
-                                       CornerRadius="3">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="{Binding Name}"
-                                                  FontWeight="Bold"
-                                                  FontSize="14"/>
-                                        <TextBlock Text="{Binding IpAddress}"
-                                                  FontSize="12"
-                                                  Foreground="#666666"/>
-                                        <TextBlock FontSize="11"
-                                                  Foreground="#999999">
-                                            <Run Text="Port: "/>
-                                            <Run Text="{Binding Port}"/>
-                                        </TextBlock>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Border>
-            </StackPanel>
-
-            <!-- Separator -->
-            <Separator Margin="0,10"/>
-
-            <!-- Manual Connection Section -->
-            <Expander Header="Manual Connection"
-                     IsExpanded="{Binding !HasDiscoveredServers}"
-                     ExpandDirection="Down">
-                <StackPanel Spacing="10" Margin="10">
-
-                    <TextBlock Text="Enter server details manually"
-                              FontSize="12"
-                              Foreground="#666666"
-                              TextWrapping="Wrap"/>
-
-                    <TextBlock Text="IP Address"
-                              FontSize="14"
-                              FontWeight="SemiBold"/>
-
-                    <TextBox Watermark="e.g., 192.168.1.100"
-                            Text="{Binding ManualIpAddress}"
-                            Padding="10"
-                            CornerRadius="3"/>
-
-                    <TextBlock Text="Port"
-                              FontSize="14"
-                              FontWeight="SemiBold"
-                              Margin="0,10,0,0"/>
-
-                    <NumericUpDown Value="{Binding ManualPort}"
-                                  Minimum="1"
-                                  Maximum="65535"
-                                  Increment="1"
-                                  FormatString="0"
-                                  Padding="10"
-                                  CornerRadius="3"/>
-                </StackPanel>
-            </Expander>
-
-            <!-- Connect Button -->
-            <Button Command="{Binding ConnectCommand}"
-                   HorizontalAlignment="Stretch"
-                   Padding="15,12"
-                   Background="#4CAF50"
-                   Foreground="White"
-                   FontSize="16"
-                   FontWeight="Bold"
-                   CornerRadius="5"
-                   Margin="0,10,0,0">
-                <TextBlock Text="Connect to Server"/>
-            </Button>
-
-            <!-- Help Text -->
-            <Border Background="#FFF3CD"
+            <!-- QR Code for Web UI -->
+            <Border Background="#111827"
                    Padding="10"
                    CornerRadius="5"
-                   Margin="0,20,0,0">
-                <StackPanel Spacing="5">
-                    <TextBlock Text="Connection Help"
+                   Margin="0,10,0,0"
+                   IsVisible="{Binding ShowQrCode}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Web Control (no install)"
                               FontWeight="Bold"
-                              FontSize="14"/>
+                              FontSize="14"
+                              Foreground="#F9FAFB"/>
+                    <TextBlock Text="Scan this QR code to open the browser UI."
+                              FontSize="12"
+                              Foreground="#D1D5DB"
+                              TextWrapping="Wrap"/>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Select IP address"
+                                  FontSize="12"
+                                  Foreground="#D1D5DB"/>
+                        <ComboBox ItemsSource="{Binding LocalIpAddresses}"
+                                  SelectedItem="{Binding SelectedLocalIpAddress}"
+                                  HorizontalAlignment="Stretch"/>
+                    </StackPanel>
+                    <Image Source="{Binding QrCodeImage}"
+                           Width="200"
+                           Height="200"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding QrCodeUrl}"
+                              FontSize="11"
+                              Foreground="#D1D5DB"
+                              TextWrapping="Wrap"
+                              TextAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Help Text -->
+            <Border Background="#1E293B"
+                   Padding="10"
+                   CornerRadius="5"
+                   Margin="0,10,0,0">
+                <StackPanel Spacing="5">
+                    <TextBlock Text="How it works"
+                              FontWeight="Bold"
+                              FontSize="14"
+                              Foreground="#F9FAFB"/>
                     <TextBlock TextWrapping="Wrap"
-                              FontSize="12">
-                        <Run Text="1. Make sure your PC is running EDSC server"/>
+                              FontSize="12"
+                              Foreground="#E5E7EB">
+                        <Run Text="1. Keep EDSC running on your PC"/>
                         <LineBreak/>
-                        <Run Text="2. Ensure both devices are on the same WiFi network"/>
+                        <Run Text="2. Pick the correct IP address"/>
                         <LineBreak/>
-                        <Run Text="3. Tap 'Discover Servers' or enter IP manually"/>
+                        <Run Text="3. Scan the QR code with your phone"/>
                         <LineBreak/>
-                        <Run Text="4. Select a server and tap 'Connect'"/>
+                        <Run Text="4. Use the browser UI to press buttons"/>
                     </TextBlock>
                 </StackPanel>
             </Border>
 
         </StackPanel>
     </ScrollViewer>
-
 </UserControl>

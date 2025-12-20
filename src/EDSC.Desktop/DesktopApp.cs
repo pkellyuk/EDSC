@@ -2,12 +2,17 @@ using Avalonia.Controls.ApplicationLifetimes;
 using EDSC.Desktop.Services;
 using EDSC.Models;
 using EDSC.Services;
-using EDSC.Services.Discovery;
+using EDSC.ViewModels;
+using QRCoder;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 
 namespace EDSC.Desktop
 {
@@ -16,7 +21,6 @@ namespace EDSC.Desktop
     /// </summary>
     public class DesktopApp : App
     {
-        private IDiscoveryService? _discoveryService;
         private ICommandServer? _commandServer;
         private IKeyboardService? _keyboardService;
         private ServerConfig? _serverConfig;
@@ -24,8 +28,6 @@ namespace EDSC.Desktop
         public override async void OnFrameworkInitializationCompleted()
         {
             Debug.WriteLine("[DesktopApp] Entry: OnFrameworkInitializationCompleted");
-
-            base.OnFrameworkInitializationCompleted();
 
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
@@ -40,21 +42,26 @@ namespace EDSC.Desktop
                         _serverConfig = new ServerConfig();
                     }
 
-                    Debug.WriteLine($"[DesktopApp] Server config loaded: Port={_serverConfig.Port}, DiscoveryPort={_serverConfig.DiscoveryPort}");
+                    Debug.WriteLine($"[DesktopApp] Server config loaded: Port={_serverConfig.Port}");
+
+                    var configService = new JsonConfigurationService();
+
+                    var localIps = GetLocalIpAddresses();
+                    var selectedIp = localIps.FirstOrDefault() ?? "127.0.0.1";
 
                     // Initialize keyboard service
                     _keyboardService = new WindowsKeyboardService();
                     Debug.WriteLine("[DesktopApp] Keyboard service initialized");
 
                     // Initialize HTTP command server
-                    _commandServer = new HttpCommandServer(_keyboardService);
+                    _commandServer = new HttpCommandServer(_keyboardService, configService);
                     Debug.WriteLine("[DesktopApp] Command server initialized");
 
                     // Start HTTP server
                     if (_serverConfig.AutoStart)
                     {
                         Debug.WriteLine($"[DesktopApp] Starting HTTP server on port {_serverConfig.Port}");
-                        await _commandServer.StartAsync(_serverConfig.Port);
+                        await _commandServer.StartAsync(_serverConfig.Port, selectedIp);
                         Debug.WriteLine("[DesktopApp] HTTP server started successfully");
                     }
                     else
@@ -62,20 +69,22 @@ namespace EDSC.Desktop
                         Debug.WriteLine("[DesktopApp] HTTP server auto-start disabled");
                     }
 
-                    // Initialize and start discovery service
-                    if (_serverConfig.EnableDiscovery)
+                    var connectionViewModel = new ConnectionViewModel();
+                    var shellViewModel = new DesktopShellViewModel(connectionViewModel, configService, _serverConfig.Port);
+                    desktop.MainWindow = new MainWindow
                     {
-                        _discoveryService = new UdpDiscoveryServicePC(_serverConfig);
-                        Debug.WriteLine($"[DesktopApp] Starting discovery service on port {_serverConfig.DiscoveryPort}");
-                        await _discoveryService.StartListeningAsync(_serverConfig.DiscoveryPort);
-                        Debug.WriteLine("[DesktopApp] Discovery service started successfully");
-                    }
-                    else
-                    {
-                        Debug.WriteLine("[DesktopApp] Discovery service disabled in configuration");
-                    }
+                        DataContext = shellViewModel
+                    };
+                    desktop.MainWindow.Show();
+                    desktop.MainWindow.Activate();
 
-                    // TODO: Create and show main window (optional - can run as headless server)
+                    connectionViewModel.SetLocalIpAddresses(localIps);
+                    connectionViewModel.LocalIpAddressChanged += (_, ip) =>
+                    {
+                        UpdateQrCode(connectionViewModel, ip, _serverConfig.Port);
+                        _ = RebindCommandServerAsync(ip, _serverConfig.Port);
+                    };
+                    UpdateQrCode(connectionViewModel, selectedIp, _serverConfig.Port);
 
                     // Register shutdown handler
                     desktop.Exit += OnApplicationExit;
@@ -89,6 +98,7 @@ namespace EDSC.Desktop
                 }
             }
 
+            base.OnFrameworkInitializationCompleted();
             Debug.WriteLine("[DesktopApp] Exit: OnFrameworkInitializationCompleted");
         }
 
@@ -106,18 +116,9 @@ namespace EDSC.Desktop
                     Debug.WriteLine("[DesktopApp] HTTP command server stopped");
                 }
 
-                // Stop discovery service
-                if (_discoveryService != null && _discoveryService.IsRunning)
-                {
-                    Debug.WriteLine("[DesktopApp] Stopping discovery service");
-                    await _discoveryService.StopListeningAsync();
-                    Debug.WriteLine("[DesktopApp] Discovery service stopped");
-                }
-
                 // Cleanup
                 _keyboardService = null;
                 _commandServer = null;
-                _discoveryService = null;
             }
             catch (Exception ex)
             {
@@ -125,6 +126,143 @@ namespace EDSC.Desktop
             }
 
             Debug.WriteLine("[DesktopApp] Exit: OnApplicationExit");
+        }
+
+        private static void UpdateQrCode(ConnectionViewModel viewModel, string ipAddress, int port)
+        {
+            if (viewModel == null || string.IsNullOrEmpty(ipAddress))
+            {
+                return;
+            }
+
+            var url = BuildWebUiUrl(port, ipAddress);
+            if (string.IsNullOrEmpty(url))
+            {
+                return;
+            }
+
+            var qrBitmap = GenerateQrCode(url);
+            if (qrBitmap != null)
+            {
+                viewModel.SetQrCode(qrBitmap, url);
+            }
+        }
+
+        private async Task RebindCommandServerAsync(string ipAddress, int port)
+        {
+            try
+            {
+                if (_commandServer == null)
+                {
+                    return;
+                }
+
+                if (_commandServer.IsRunning)
+                {
+                    await _commandServer.StopAsync();
+                }
+
+                await _commandServer.StartAsync(port, ipAddress);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error rebinding HTTP server: {ex.Message}");
+            }
+        }
+
+        private static Bitmap? GenerateQrCode(string url)
+        {
+            if (string.IsNullOrEmpty(url))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var generator = new QRCodeGenerator();
+                using var data = generator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
+                var pngQr = new PngByteQRCode(data);
+                var bytes = pngQr.GetGraphic(6);
+                return new Bitmap(new MemoryStream(bytes));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error generating QR code: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static string BuildWebUiUrl(int port, string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+            {
+                return string.Empty;
+            }
+
+            return $"http://{ipAddress}:{port}/web";
+        }
+
+        private static string[] GetLocalIpAddresses()
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+
+                if (host?.AddressList == null)
+                {
+                    return new[] { "127.0.0.1" };
+                }
+
+                var addresses = host.AddressList
+                    .Where(ip => ip != null && ip.AddressFamily == AddressFamily.InterNetwork)
+                    .Select(ip => ip.ToString())
+                    .Where(ip => !string.IsNullOrEmpty(ip))
+                    .Distinct()
+                    .ToArray();
+
+                if (addresses.Length > 0)
+                {
+                    return addresses;
+                }
+
+                return new[] { "127.0.0.1" };
+            }
+            catch
+            {
+                return new[] { "127.0.0.1" };
+            }
+        }
+
+        private static string GetLocalIpAddress()
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+
+                if (host?.AddressList == null)
+                {
+                    return "127.0.0.1";
+                }
+
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip == null)
+                    {
+                        continue;
+                    }
+
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return ip.ToString();
+                    }
+                }
+
+                return "127.0.0.1";
+            }
+            catch
+            {
+                return "127.0.0.1";
+            }
         }
 
         private async Task<ServerConfig?> LoadConfigurationAsync()

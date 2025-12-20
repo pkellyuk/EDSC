@@ -9,133 +9,192 @@
       "key": "U",
       "icon": "build",
       "color": "#6B7280",
-      "label": "Hardpoints"
+      "label": "Hardpoints",
+      "size": 80
     },
     {
       "id": "landinggear",
       "key": "L",
       "icon": "flight_land",
       "color": "#4B5563",
-      "label": "Landing Gear"
+      "label": "Landing Gear",
+      "size": 80
     },
     {
       "id": "cargoscoop",
       "key": "HOME",
       "icon": "inbox",
       "color": "#92400E",
-      "label": "Cargo Scoop"
+      "label": "Cargo Scoop",
+      "size": 80
     },
     {
       "id": "silentrunning",
       "key": "DELETE",
       "icon": "visibility_off",
       "color": "#7C3AED",
-      "label": "Silent Running"
+      "label": "Silent Running",
+      "size": 80
     },
     {
       "id": "fsd",
       "key": "J",
       "icon": "travel_explore",
       "color": "#2563EB",
-      "label": "FSD Jump"
+      "label": "FSD Jump",
+      "size": 80
     },
     {
       "id": "orbitlines",
       "key": "OEM_PLUS",
       "icon": "timeline",
       "color": "#0EA5E9",
-      "label": "Orbit Lines"
+      "label": "Orbit Lines",
+      "size": 80
     },
     {
       "id": "targetahead",
       "key": "T",
       "icon": "gps_fixed",
       "color": "#10B981",
-      "label": "Target Ahead"
+      "label": "Target Ahead",
+      "size": 80
     },
     {
       "id": "nexttarget",
       "key": "G",
       "icon": "my_location",
       "color": "#059669",
-      "label": "Next Target"
+      "label": "Next Target",
+      "size": 80
     },
     {
       "id": "highestthreat",
       "key": "H",
       "icon": "priority_high",
       "color": "#DC2626",
-      "label": "Highest Threat"
+      "label": "Highest Threat",
+      "size": 80
     },
     {
       "id": "nextsubsystem",
       "key": "Y",
       "icon": "swap_horiz",
       "color": "#F59E0B",
-      "label": "Next Subsystem"
+      "label": "Next Subsystem",
+      "size": 80
     },
     {
       "id": "nextfiregroup",
       "key": "N",
       "icon": "layers",
       "color": "#F97316",
-      "label": "Next Fire Group"
+      "label": "Next Fire Group",
+      "size": 80
     },
     {
       "id": "flightassist",
       "key": "Z",
       "icon": "alt_route",
       "color": "#14B8A6",
-      "label": "Flight Assist"
+      "label": "Flight Assist",
+      "size": 80
     },
     {
       "id": "setzero",
       "key": "X",
       "icon": "exposure_zero",
       "color": "#0F766E",
-      "label": "Speed 0%"
+      "label": "Speed 0%",
+      "size": 80
     },
     {
       "id": "leftpanel",
       "key": "1",
       "icon": "filter_1",
       "color": "#1D4ED8",
-      "label": "Left Panel"
+      "label": "Left Panel",
+      "size": 80
     },
     {
       "id": "commspanel",
       "key": "2",
       "icon": "filter_2",
       "color": "#1E40AF",
-      "label": "Comms Panel"
+      "label": "Comms Panel",
+      "size": 80
     },
     {
       "id": "radarpanel",
       "key": "3",
       "icon": "filter_3",
       "color": "#1E3A8A",
-      "label": "Radar Panel"
+      "label": "Radar Panel",
+      "size": 80
     },
     {
       "id": "rightpanel",
       "key": "4",
       "icon": "filter_4",
       "color": "#1E3A8A",
-      "label": "Right Panel"
+      "label": "Right Panel",
+      "size": 80
     },
     {
       "id": "quickcomms",
       "key": "ENTER",
       "icon": "sms",
       "color": "#374151",
-      "label": "Quick Comms"
+      "label": "Quick Comms",
+      "size": 80
     },
     {
       "id": "hudmode",
       "key": "M",
       "icon": "visibility",
       "color": "#6D28D9",
-      "label": "HUD Mode"
+      "label": "HUD Mode",
+      "size": 80
+    },
+    {
+      "id": "wingman1",
+      "key": "7",
+      "icon": "group",
+      "color": "#2563EB",
+      "label": "Wingman 1",
+      "size": 80
+    },
+    {
+      "id": "wingman2",
+      "key": "8",
+      "icon": "group",
+      "color": "#1D4ED8",
+      "label": "Wingman 2",
+      "size": 80
+    },
+    {
+      "id": "wingman3",
+      "key": "9",
+      "icon": "group",
+      "color": "#1E40AF",
+      "label": "Wingman 3",
+      "size": 80
+    },
+    {
+      "id": "wingmantarget",
+      "key": "0",
+      "icon": "assistant",
+      "color": "#312E81",
+      "label": "Wingman Target",
+      "size": 80
+    },
+    {
+      "id": "wingnavlock",
+      "key": "OEM_MINUS",
+      "icon": "link",
+      "color": "#4B5563",
+      "label": "Wing Nav Lock",
+      "size": 80
     }
   ]
 }

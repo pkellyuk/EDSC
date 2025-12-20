@@ -7,8 +7,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EDSC", "src\EDSC\EDSC.cspro
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EDSC.Desktop", "src\EDSC.Desktop\EDSC.Desktop.csproj", "{B2C2D2E2-F2A2-5B6C-AD4E-2F3A4B5C6D7E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EDSC.Android", "src\EDSC.Android\EDSC.Android.csproj", "{C3D3E3F3-A3B3-6C7D-BE5F-3A4B5C6D7E8F}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -23,9 +21,5 @@ Global
 		{B2C2D2E2-F2A2-5B6C-AD4E-2F3A4B5C6D7E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B2C2D2E2-F2A2-5B6C-AD4E-2F3A4B5C6D7E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B2C2D2E2-F2A2-5B6C-AD4E-2F3A4B5C6D7E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{C3D3E3F3-A3B3-6C7D-BE5F-3A4B5C6D7E8F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C3D3E3F3-A3B3-6C7D-BE5F-3A4B5C6D7E8F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C3D3E3F3-A3B3-6C7D-BE5F-3A4B5C6D7E8F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C3D3E3F3-A3B3-6C7D-BE5F-3A4B5C6D7E8F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -11,7 +11,7 @@ namespace EDSC.Services
         /// <summary>
         /// Start the command server on the specified port
         /// </summary>
-        Task StartAsync(int port, CancellationToken cancellationToken = default);
+        Task StartAsync(int port, string? bindAddress = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Stop the command server

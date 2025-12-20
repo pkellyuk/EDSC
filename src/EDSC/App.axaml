@@ -1,9 +1,16 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:EDSC.Converters"
              x:Class="EDSC.App"
              RequestedThemeVariant="Default">
 
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>
+
+    <Application.Resources>
+        <conv:BoolNotConverter x:Key="BoolNotConverter" />
+        <conv:BoolToColorConverter x:Key="BoolToColorConverter" />
+        <conv:StringNotEmptyConverter x:Key="StringNotEmptyConverter" />
+    </Application.Resources>
 </Application>

@@ -20,10 +20,13 @@ namespace EDSC.Desktop.Services
     {
         private IHost? _host;
         private readonly IKeyboardService _keyboardService;
+        private readonly IConfigurationService _configService;
+        private readonly object _configLock = new object();
+        private AppConfig? _currentConfig;
 
         public bool IsRunning { get; private set; }
 
-        public HttpCommandServer(IKeyboardService keyboardService)
+        public HttpCommandServer(IKeyboardService keyboardService, IConfigurationService configService)
         {
             Debug.WriteLine("[HttpCommandServer] Entry: Constructor");
 
@@ -32,14 +35,20 @@ namespace EDSC.Desktop.Services
                 throw new ArgumentNullException(nameof(keyboardService));
             }
 
+            if (configService == null)
+            {
+                throw new ArgumentNullException(nameof(configService));
+            }
+
             _keyboardService = keyboardService;
+            _configService = configService;
 
             Debug.WriteLine("[HttpCommandServer] Exit: Constructor");
         }
 
-        public async Task StartAsync(int port, CancellationToken cancellationToken = default)
+        public async Task StartAsync(int port, string? bindAddress = null, CancellationToken cancellationToken = default)
         {
-            Debug.WriteLine($"[HttpCommandServer] Entry: StartAsync(port={port})");
+            Debug.WriteLine($"[HttpCommandServer] Entry: StartAsync(port={port}, bindAddress={bindAddress})");
 
             if (IsRunning)
             {
@@ -49,6 +58,8 @@ namespace EDSC.Desktop.Services
 
             try
             {
+                _currentConfig = await LoadConfigAsync();
+
                 Debug.WriteLine($"[HttpCommandServer] Building web host on port {port}");
 
                 _host = Host.CreateDefaultBuilder()
@@ -56,7 +67,18 @@ namespace EDSC.Desktop.Services
                     {
                         webBuilder.UseKestrel(options =>
                         {
-                            options.ListenAnyIP(port);
+                            if (!string.IsNullOrEmpty(bindAddress) && System.Net.IPAddress.TryParse(bindAddress, out var ip))
+                            {
+                                options.Listen(ip, port);
+                                if (!System.Net.IPAddress.IsLoopback(ip))
+                                {
+                                    options.Listen(System.Net.IPAddress.Loopback, port);
+                                }
+                            }
+                            else
+                            {
+                                options.ListenAnyIP(port);
+                            }
                         });
 
                         webBuilder.Configure(app =>
@@ -74,6 +96,14 @@ namespace EDSC.Desktop.Services
                                         version = "1.0.0"
                                     });
                                     await context.Response.WriteAsync(healthJson);
+                                }
+                                else if (context.Request.Path == "/config" && context.Request.Method == "GET")
+                                {
+                                    await HandleConfigGet(context);
+                                }
+                                else if (context.Request.Path == "/web" && context.Request.Method == "GET")
+                                {
+                                    await HandleWebUiRequest(context);
                                 }
                                 else if (context.Request.Path == "/command" && context.Request.Method == "POST")
                                 {
@@ -100,6 +130,244 @@ namespace EDSC.Desktop.Services
             }
 
             Debug.WriteLine("[HttpCommandServer] Exit: StartAsync");
+        }
+
+        private async Task<AppConfig> LoadConfigAsync()
+        {
+            Debug.WriteLine("[HttpCommandServer] Entry: LoadConfigAsync");
+
+            var config = await _configService.LoadConfigurationAsync();
+
+            if (config == null)
+            {
+                Debug.WriteLine("[HttpCommandServer] Config service returned null, using defaults");
+                config = new AppConfig();
+            }
+
+            EnsureConfigMetadata(config, "server");
+
+            Debug.WriteLine("[HttpCommandServer] Exit: LoadConfigAsync");
+            return config;
+        }
+
+        private static void EnsureConfigMetadata(AppConfig config, string updatedBy)
+        {
+            if (config.ConfigVersion <= 0)
+            {
+                config.ConfigVersion = 1;
+            }
+
+            if (config.LastUpdatedUtc <= 0)
+            {
+                config.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            }
+
+            if (string.IsNullOrEmpty(config.LastUpdatedBy))
+            {
+                config.LastUpdatedBy = updatedBy ?? string.Empty;
+            }
+        }
+
+        private async Task HandleConfigGet(HttpContext context)
+        {
+            Debug.WriteLine("[HttpCommandServer] Entry: HandleConfigGet");
+
+            if (context == null)
+            {
+                Debug.WriteLine("[HttpCommandServer] Context is null");
+                return;
+            }
+
+            AppConfig configToReturn;
+
+            lock (_configLock)
+            {
+                configToReturn = _currentConfig ?? new AppConfig();
+            }
+
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(configToReturn));
+
+            Debug.WriteLine("[HttpCommandServer] Exit: HandleConfigGet");
+        }
+
+        private async Task HandleWebUiRequest(HttpContext context)
+        {
+            Debug.WriteLine("[HttpCommandServer] Entry: HandleWebUiRequest");
+
+            if (context == null)
+            {
+                Debug.WriteLine("[HttpCommandServer] Context is null");
+                return;
+            }
+
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.WriteAsync(GetWebUiHtml());
+
+            Debug.WriteLine("[HttpCommandServer] Exit: HandleWebUiRequest");
+        }
+
+        private static string GetWebUiHtml()
+        {
+            return @"<!doctype html>
+<html lang=""en"">
+<head>
+  <meta charset=""utf-8"">
+  <meta name=""viewport"" content=""width=device-width, initial-scale=1"">
+  <title>EDSC Web Control</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #1b1f26;
+      --text: #f2f4f8;
+      --muted: #9aa4b2;
+      --accent: #4caf50;
+    }
+    body {
+      margin: 0;
+      font-family: ""Segoe UI"", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 16px;
+      text-align: center;
+      background: #121621;
+      border-bottom: 1px solid #252b36;
+    }
+    header h1 {
+      margin: 0 0 6px 0;
+      font-size: 18px;
+    }
+    header p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .status {
+      background: var(--card);
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+    }
+    .btn {
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      background: var(--accent);
+    }
+    .btn small {
+      display: block;
+      font-weight: 400;
+      opacity: 0.8;
+      margin-top: 4px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .toolbar button {
+      border: 1px solid #2f3746;
+      background: #1d2430;
+      color: #e6e9ef;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>EDSC Web Control</h1>
+    <p>Connected to your PC server</p>
+  </header>
+  <main>
+    <div class=""status"" id=""status"">Loading buttons...</div>
+    <div class=""toolbar"">
+      <button id=""reload"">Reload config</button>
+    </div>
+    <div class=""grid"" id=""grid""></div>
+  </main>
+  <script>
+    const statusEl = document.getElementById('status');
+    const gridEl = document.getElementById('grid');
+    const reloadBtn = document.getElementById('reload');
+
+    async function loadConfig() {
+      statusEl.textContent = 'Loading buttons...';
+      gridEl.innerHTML = '';
+      try {
+        const res = await fetch('/config');
+        const config = await res.json();
+        const buttons = (config && config.buttons) ? config.buttons : [];
+        if (!buttons.length) {
+          statusEl.textContent = 'No buttons configured.';
+          return;
+        }
+        statusEl.textContent = `Loaded ${buttons.length} buttons`;
+        for (const button of buttons) {
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.style.background = button.color || '#4caf50';
+          btn.style.width = (button.size || 80) + 'px';
+          btn.style.height = (button.size || 80) + 'px';
+          btn.innerHTML = `<div>${button.label || button.id}</div><small>${button.key || ''}</small>`;
+          btn.addEventListener('click', () => sendCommand(button));
+          gridEl.appendChild(btn);
+        }
+      } catch (err) {
+        statusEl.textContent = 'Failed to load config.';
+      }
+    }
+
+    async function sendCommand(button) {
+      if (!button || !button.key) {
+        return;
+      }
+      statusEl.textContent = `Sending ${button.label || button.id}...`;
+      try {
+        const res = await fetch('/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            buttonId: button.id || '',
+            key: button.key,
+            timestamp: Date.now()
+          })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          statusEl.textContent = data.message || 'Command sent';
+        } else {
+          statusEl.textContent = data && data.message ? data.message : 'Command failed';
+        }
+      } catch (err) {
+        statusEl.textContent = 'Command failed';
+      }
+    }
+
+    reloadBtn.addEventListener('click', loadConfig);
+    loadConfig();
+  </script>
+</body>
+</html>";
         }
 
         private async Task HandleCommandRequest(HttpContext context)

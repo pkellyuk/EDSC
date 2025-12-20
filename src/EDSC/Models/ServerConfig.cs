@@ -11,25 +11,13 @@ namespace EDSC.Models
         /// HTTP port for command server
         /// </summary>
         [JsonPropertyName("port")]
-        public int Port { get; set; } = 5000;
-
-        /// <summary>
-        /// UDP port for discovery service
-        /// </summary>
-        [JsonPropertyName("discoveryPort")]
-        public int DiscoveryPort { get; set; } = 5001;
+        public int Port { get; set; } = 9000;
 
         /// <summary>
         /// Whether to start the server automatically when the app starts
         /// </summary>
         [JsonPropertyName("autoStart")]
         public bool AutoStart { get; set; } = true;
-
-        /// <summary>
-        /// Whether to enable network discovery
-        /// </summary>
-        [JsonPropertyName("enableDiscovery")]
-        public bool EnableDiscovery { get; set; } = true;
 
         public ServerConfig()
         {
@@ -38,7 +26,7 @@ namespace EDSC.Models
 
         public override string ToString()
         {
-            return $"ServerConfig [Port={Port}, DiscoveryPort={DiscoveryPort}, AutoStart={AutoStart}, EnableDiscovery={EnableDiscovery}]";
+            return $"ServerConfig [Port={Port}, AutoStart={AutoStart}]";
         }
     }
 }

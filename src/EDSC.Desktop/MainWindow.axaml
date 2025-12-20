@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:EDSC.Views"
+        xmlns:desktop="using:EDSC.Desktop"
+        x:Class="EDSC.Desktop.MainWindow"
+        x:DataType="desktop:DesktopShellViewModel"
+        Width="420"
+        Height="720"
+        MinWidth="360"
+        MinHeight="640"
+        Title="EDSC"
+        WindowStartupLocation="CenterScreen">
+    <TabControl>
+        <TabItem Header="Connection">
+            <views:ConnectionView DataContext="{Binding Connection}" />
+        </TabItem>
+        <TabItem Header="Controls">
+            <views:MainView DataContext="{Binding Controls}" />
+        </TabItem>
+    </TabControl>
+</Window>

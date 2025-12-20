@@ -135,50 +135,186 @@ namespace EDSC.Services
             {
                 Server = new ServerConfig
                 {
-                    Port = 5000,
-                    DiscoveryPort = 5001,
-                    AutoStart = true,
-                    EnableDiscovery = true
+                    Port = 9000,
+                    AutoStart = true
                 },
                 Buttons = new System.Collections.Generic.List<ButtonConfig>
                 {
                     new ButtonConfig
                     {
-                        Id = "shieldboost",
-                        Key = "F1",
-                        Icon = "shield",
-                        Color = "#4CAF50",
-                        Label = "Shield Boost",
+                        Id = "hardpoints",
+                        Key = "U",
+                        Icon = "build",
+                        Color = "#6B7280",
+                        Label = "Hardpoints",
                         Size = 80
                     },
                     new ButtonConfig
                     {
-                        Id = "ecm",
-                        Key = "F2",
-                        Icon = "flash",
-                        Color = "#2196F3",
-                        Label = "ECM",
+                        Id = "landinggear",
+                        Key = "L",
+                        Icon = "flight_land",
+                        Color = "#4B5563",
+                        Label = "Landing Gear",
                         Size = 80
                     },
                     new ButtonConfig
                     {
-                        Id = "chaff",
-                        Key = "F3",
-                        Icon = "smoke",
-                        Color = "#FF9800",
-                        Label = "Chaff",
+                        Id = "cargoscoop",
+                        Key = "HOME",
+                        Icon = "inbox",
+                        Color = "#92400E",
+                        Label = "Cargo Scoop",
                         Size = 80
                     },
                     new ButtonConfig
                     {
-                        Id = "heatsink",
-                        Key = "F4",
-                        Icon = "ac_unit",
-                        Color = "#00BCD4",
-                        Label = "Heat Sink",
+                        Id = "silentrunning",
+                        Key = "DELETE",
+                        Icon = "visibility_off",
+                        Color = "#7C3AED",
+                        Label = "Silent Running",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "fsd",
+                        Key = "J",
+                        Icon = "travel_explore",
+                        Color = "#2563EB",
+                        Label = "FSD Jump",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "orbitlines",
+                        Key = "OEM_PLUS",
+                        Icon = "timeline",
+                        Color = "#0EA5E9",
+                        Label = "Orbit Lines",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "targetahead",
+                        Key = "T",
+                        Icon = "gps_fixed",
+                        Color = "#10B981",
+                        Label = "Target Ahead",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "nexttarget",
+                        Key = "G",
+                        Icon = "my_location",
+                        Color = "#059669",
+                        Label = "Next Target",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "highestthreat",
+                        Key = "H",
+                        Icon = "priority_high",
+                        Color = "#DC2626",
+                        Label = "Highest Threat",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "nextsubsystem",
+                        Key = "Y",
+                        Icon = "swap_horiz",
+                        Color = "#F59E0B",
+                        Label = "Next Subsystem",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "nextfiregroup",
+                        Key = "N",
+                        Icon = "layers",
+                        Color = "#F97316",
+                        Label = "Next Fire Group",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "flightassist",
+                        Key = "Z",
+                        Icon = "alt_route",
+                        Color = "#14B8A6",
+                        Label = "Flight Assist",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "setzero",
+                        Key = "X",
+                        Icon = "exposure_zero",
+                        Color = "#0F766E",
+                        Label = "Speed 0%",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "leftpanel",
+                        Key = "1",
+                        Icon = "filter_1",
+                        Color = "#1D4ED8",
+                        Label = "Left Panel",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "commspanel",
+                        Key = "2",
+                        Icon = "filter_2",
+                        Color = "#1E40AF",
+                        Label = "Comms Panel",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "radarpanel",
+                        Key = "3",
+                        Icon = "filter_3",
+                        Color = "#1E3A8A",
+                        Label = "Radar Panel",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "rightpanel",
+                        Key = "4",
+                        Icon = "filter_4",
+                        Color = "#1E3A8A",
+                        Label = "Right Panel",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "quickcomms",
+                        Key = "ENTER",
+                        Icon = "sms",
+                        Color = "#374151",
+                        Label = "Quick Comms",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "hudmode",
+                        Key = "M",
+                        Icon = "visibility",
+                        Color = "#6D28D9",
+                        Label = "HUD Mode",
                         Size = 80
                     }
-                }
+                },
+                ConfigVersion = 1,
+                LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                LastUpdatedBy = "local"
             };
 
             Debug.WriteLine($"[JsonConfigurationService] Created default configuration with {config.Buttons.Count} buttons");

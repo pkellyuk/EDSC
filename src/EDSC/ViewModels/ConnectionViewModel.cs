@@ -1,132 +1,23 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Input;
-using EDSC.Models.Discovery;
-using EDSC.Services.Discovery;
+using Avalonia.Media.Imaging;
 
 namespace EDSC.ViewModels
 {
     /// <summary>
-    /// ViewModel for the connection view (mobile) - manages server discovery and connection
+    /// ViewModel for the connection view (desktop) - QR code and IP selection.
     /// </summary>
     public class ConnectionViewModel : ViewModelBase
     {
-        private readonly IDiscoveryService _discoveryService;
-        private ObservableCollection<DiscoveredServer> _discoveredServers;
-        private DiscoveredServer _selectedServer;
-        private bool _isDiscovering;
-        private string _manualIpAddress;
-        private int _manualPort;
         private string _statusMessage;
-        private CancellationTokenSource _discoveryCts;
-
-        public ObservableCollection<DiscoveredServer> DiscoveredServers
-        {
-            get
-            {
-                if (_discoveredServers == null)
-                {
-                    return new ObservableCollection<DiscoveredServer>();
-                }
-                return _discoveredServers;
-            }
-            set
-            {
-                if (_discoveredServers == value)
-                {
-                    return;
-                }
-
-                _discoveredServers = value;
-                OnPropertyChanged(nameof(DiscoveredServers));
-                OnPropertyChanged(nameof(HasDiscoveredServers));
-            }
-        }
-
-        public DiscoveredServer SelectedServer
-        {
-            get
-            {
-                return _selectedServer;
-            }
-            set
-            {
-                if (_selectedServer == value)
-                {
-                    return;
-                }
-
-                _selectedServer = value;
-                OnPropertyChanged(nameof(SelectedServer));
-            }
-        }
-
-        public bool IsDiscovering
-        {
-            get
-            {
-                return _isDiscovering;
-            }
-            set
-            {
-                if (_isDiscovering == value)
-                {
-                    return;
-                }
-
-                _isDiscovering = value;
-                OnPropertyChanged(nameof(IsDiscovering));
-            }
-        }
-
-        public string ManualIpAddress
-        {
-            get
-            {
-                if (string.IsNullOrEmpty(_manualIpAddress))
-                {
-                    return string.Empty;
-                }
-                return _manualIpAddress;
-            }
-            set
-            {
-                if (_manualIpAddress == value)
-                {
-                    return;
-                }
-
-                _manualIpAddress = value;
-                OnPropertyChanged(nameof(ManualIpAddress));
-            }
-        }
-
-        public int ManualPort
-        {
-            get
-            {
-                if (_manualPort <= 0)
-                {
-                    return 5000;
-                }
-                return _manualPort;
-            }
-            set
-            {
-                if (_manualPort == value)
-                {
-                    return;
-                }
-
-                _manualPort = value;
-                OnPropertyChanged(nameof(ManualPort));
-            }
-        }
+        private bool _showQrCode;
+        private Bitmap? _qrCodeImage;
+        private string _qrCodeUrl;
+        private ObservableCollection<string> _localIpAddresses;
+        private string _selectedLocalIpAddress;
 
         public string StatusMessage
         {
@@ -150,194 +41,169 @@ namespace EDSC.ViewModels
             }
         }
 
-        public bool HasDiscoveredServers => DiscoveredServers != null && DiscoveredServers.Count > 0;
+        public bool ShowQrCode
+        {
+            get
+            {
+                return _showQrCode;
+            }
+            set
+            {
+                if (_showQrCode == value)
+                {
+                    return;
+                }
 
-        public ICommand DiscoverServersCommand { get; }
-        public ICommand ConnectCommand { get; }
+                _showQrCode = value;
+                OnPropertyChanged(nameof(ShowQrCode));
+            }
+        }
 
-        public ConnectionViewModel(IDiscoveryService discoveryService)
+        public Bitmap? QrCodeImage
+        {
+            get
+            {
+                return _qrCodeImage;
+            }
+            set
+            {
+                if (_qrCodeImage == value)
+                {
+                    return;
+                }
+
+                _qrCodeImage = value;
+                OnPropertyChanged(nameof(QrCodeImage));
+            }
+        }
+
+        public string QrCodeUrl
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_qrCodeUrl))
+                {
+                    return string.Empty;
+                }
+                return _qrCodeUrl;
+            }
+            set
+            {
+                if (_qrCodeUrl == value)
+                {
+                    return;
+                }
+
+                _qrCodeUrl = value;
+                OnPropertyChanged(nameof(QrCodeUrl));
+            }
+        }
+
+        public ObservableCollection<string> LocalIpAddresses
+        {
+            get
+            {
+                if (_localIpAddresses == null)
+                {
+                    return new ObservableCollection<string>();
+                }
+                return _localIpAddresses;
+            }
+            set
+            {
+                if (_localIpAddresses == value)
+                {
+                    return;
+                }
+
+                _localIpAddresses = value;
+                OnPropertyChanged(nameof(LocalIpAddresses));
+            }
+        }
+
+        public string SelectedLocalIpAddress
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_selectedLocalIpAddress))
+                {
+                    return string.Empty;
+                }
+                return _selectedLocalIpAddress;
+            }
+            set
+            {
+                if (_selectedLocalIpAddress == value)
+                {
+                    return;
+                }
+
+                _selectedLocalIpAddress = value;
+                OnPropertyChanged(nameof(SelectedLocalIpAddress));
+                LocalIpAddressChanged?.Invoke(this, value);
+            }
+        }
+
+        public event EventHandler<string>? LocalIpAddressChanged;
+
+        public ConnectionViewModel()
         {
             Debug.WriteLine("[ConnectionVM] Entry: Constructor");
 
-            if (discoveryService == null)
-            {
-                throw new ArgumentNullException(nameof(discoveryService));
-            }
-
-            _discoveryService = discoveryService;
-            _discoveredServers = new ObservableCollection<DiscoveredServer>();
-            _manualPort = 5000;
-            _manualIpAddress = string.Empty;
-            _statusMessage = "Ready to discover servers";
-
-            // Initialize commands
-            DiscoverServersCommand = new RelayCommand(async () => await DiscoverServersAsync(), () => !IsDiscovering);
-            ConnectCommand = new RelayCommand(async () => await ConnectAsync(), CanConnect);
+            _statusMessage = "Select an IP address to generate the QR code";
+            _showQrCode = false;
+            _qrCodeImage = null;
+            _qrCodeUrl = string.Empty;
+            _localIpAddresses = new ObservableCollection<string>();
+            _selectedLocalIpAddress = string.Empty;
 
             Debug.WriteLine("[ConnectionVM] Exit: Constructor");
         }
 
-        public async Task DiscoverServersAsync()
+        public void SetQrCode(Bitmap qrCodeImage, string url)
         {
-            Debug.WriteLine("[ConnectionVM] Entry: DiscoverServersAsync");
-
-            if (IsDiscovering)
+            if (qrCodeImage == null)
             {
-                Debug.WriteLine("[ConnectionVM] Already discovering, returning");
                 return;
             }
 
-            IsDiscovering = true;
-            StatusMessage = "Discovering servers...";
-            DiscoveredServers.Clear();
-
-            try
-            {
-                Debug.WriteLine("[ConnectionVM] Starting discovery");
-
-                _discoveryCts = new CancellationTokenSource();
-                var servers = await _discoveryService.DiscoverServersAsync(timeoutSeconds: 3, _discoveryCts.Token);
-
-                if (servers == null)
-                {
-                    Debug.WriteLine("[ConnectionVM] Discovery returned null");
-                    StatusMessage = "Discovery failed";
-                    return;
-                }
-
-                Debug.WriteLine($"[ConnectionVM] Found {servers.Count} server(s)");
-
-                foreach (var server in servers)
-                {
-                    if (server == null)
-                    {
-                        continue;
-                    }
-
-                    DiscoveredServers.Add(server);
-                    Debug.WriteLine($"[ConnectionVM] Added server: {server.Name}");
-                }
-
-                OnPropertyChanged(nameof(HasDiscoveredServers));
-
-                if (servers.Count == 0)
-                {
-                    StatusMessage = "No servers found. Try manual connection.";
-                    Debug.WriteLine("[ConnectionVM] No servers found");
-                }
-                else
-                {
-                    StatusMessage = $"Found {servers.Count} server(s)";
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ConnectionVM] Error during discovery: {ex.Message}");
-                StatusMessage = $"Discovery error: {ex.Message}";
-            }
-            finally
-            {
-                IsDiscovering = false;
-                _discoveryCts?.Dispose();
-                _discoveryCts = null;
-                Debug.WriteLine("[ConnectionVM] Exit: DiscoverServersAsync");
-            }
+            QrCodeImage = qrCodeImage;
+            QrCodeUrl = url ?? string.Empty;
+            ShowQrCode = true;
+            StatusMessage = "Scan the QR code to open the web controls";
         }
 
-        private bool CanConnect()
+        public void SetLocalIpAddresses(IEnumerable<string> addresses)
         {
-            // Can connect if we have a selected server OR manual IP is entered
-            if (SelectedServer != null)
+            if (addresses == null)
             {
-                return true;
-            }
-
-            if (!string.IsNullOrEmpty(ManualIpAddress) && ManualPort > 0 && ManualPort <= 65535)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private async Task ConnectAsync()
-        {
-            Debug.WriteLine("[ConnectionVM] Entry: ConnectAsync");
-
-            DiscoveredServer serverToConnect = null;
-
-            if (SelectedServer != null)
-            {
-                serverToConnect = SelectedServer;
-                Debug.WriteLine($"[ConnectionVM] Connecting to selected server: {serverToConnect.Name}");
-            }
-            else if (!string.IsNullOrEmpty(ManualIpAddress))
-            {
-                serverToConnect = new DiscoveredServer
-                {
-                    Name = "Manual Entry",
-                    IpAddress = ManualIpAddress,
-                    Port = ManualPort,
-                    IsManualEntry = true,
-                    DiscoveredAt = DateTime.UtcNow
-                };
-                Debug.WriteLine($"[ConnectionVM] Connecting to manual entry: {serverToConnect.IpAddress}:{serverToConnect.Port}");
-            }
-
-            if (serverToConnect == null)
-            {
-                Debug.WriteLine("[ConnectionVM] No server to connect to");
-                StatusMessage = "Please select a server or enter IP address";
                 return;
             }
 
-            try
+            LocalIpAddresses.Clear();
+            foreach (var address in addresses)
             {
-                StatusMessage = $"Connecting to {serverToConnect.Name}...";
+                if (string.IsNullOrWhiteSpace(address))
+                {
+                    continue;
+                }
 
-                // TODO: Implement actual connection logic
-                // This would typically involve:
-                // 1. Creating HTTP client
-                // 2. Testing connection to server
-                // 3. Storing connection details
-                // 4. Navigating to main view
-
-                Debug.WriteLine($"[ConnectionVM] Connection to {serverToConnect.IpAddress}:{serverToConnect.Port} would be established here");
-                StatusMessage = $"Connected to {serverToConnect.Name}";
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ConnectionVM] Error connecting: {ex.Message}");
-                StatusMessage = $"Connection error: {ex.Message}";
+                LocalIpAddresses.Add(address);
             }
 
-            Debug.WriteLine("[ConnectionVM] Exit: ConnectAsync");
-            await Task.CompletedTask;
-        }
-
-        public void CancelDiscovery()
-        {
-            Debug.WriteLine("[ConnectionVM] Entry: CancelDiscovery");
-
-            if (_discoveryCts == null)
+            if (LocalIpAddresses.Count > 0 && string.IsNullOrEmpty(SelectedLocalIpAddress))
             {
-                Debug.WriteLine("[ConnectionVM] No active discovery to cancel");
-                return;
+                SelectedLocalIpAddress = LocalIpAddresses[0];
             }
-
-            _discoveryCts.Cancel();
-            StatusMessage = "Discovery cancelled";
-
-            Debug.WriteLine("[ConnectionVM] Exit: CancelDiscovery");
         }
     }
 
     /// <summary>
-    /// Base class for ViewModels with property change notification
+    /// Base class for ViewModels with property change notification.
     /// </summary>
-    public abstract class ViewModelBase : System.ComponentModel.INotifyPropertyChanged
+    public abstract class ViewModelBase : INotifyPropertyChanged
     {
-        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         protected virtual void OnPropertyChanged(string propertyName)
         {
@@ -346,54 +212,7 @@ namespace EDSC.ViewModels
                 return;
             }
 
-            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
-        }
-    }
-
-    /// <summary>
-    /// Simple relay command implementation
-    /// </summary>
-    public class RelayCommand : ICommand
-    {
-        private readonly Func<Task> _executeAsync;
-        private readonly Func<bool> _canExecute;
-
-        public event EventHandler CanExecuteChanged;
-
-        public RelayCommand(Func<Task> executeAsync, Func<bool> canExecute = null)
-        {
-            if (executeAsync == null)
-            {
-                throw new ArgumentNullException(nameof(executeAsync));
-            }
-
-            _executeAsync = executeAsync;
-            _canExecute = canExecute;
-        }
-
-        public bool CanExecute(object parameter)
-        {
-            if (_canExecute == null)
-            {
-                return true;
-            }
-
-            return _canExecute();
-        }
-
-        public async void Execute(object parameter)
-        {
-            if (_executeAsync == null)
-            {
-                return;
-            }
-
-            await _executeAsync();
-        }
-
-        public void RaiseCanExecuteChanged()
-        {
-            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
     }
 }

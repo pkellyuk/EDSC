@@ -35,4 +35,4 @@ packages/
 *.keystore
 
 # Runtime config
-config.json
+# (tracked config.json for the shared web control layout)

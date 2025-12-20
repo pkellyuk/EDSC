@@ -6,7 +6,7 @@ using System.Diagnostics;
 namespace EDSC
 {
     /// <summary>
-    /// Main application class - shared between Desktop and Android
+    /// Main application class for shared Avalonia resources
     /// </summary>
     public partial class App : Application
     {
@@ -23,8 +23,7 @@ namespace EDSC
         {
             Debug.WriteLine("[App] Entry: OnFrameworkInitializationCompleted");
 
-            // Platform-specific initialization happens in Desktop/Android projects
-            // This base implementation just ensures framework is ready
+            // Platform-specific initialization happens in the Desktop project.
 
             base.OnFrameworkInitializationCompleted();
 
