@@ -1,0 +1,153 @@
+using Android.App;
+using Android.Content.PM;
+using Avalonia;
+using Avalonia.Android;
+using EDSC.Services.Discovery;
+using EDSC.ViewModels;
+using EDSC.Views;
+using System;
+using System.Diagnostics;
+
+namespace EDSC.Android
+{
+    /// <summary>
+    /// Example Android MainActivity showing discovery service integration
+    /// </summary>
+    [Activity(
+        Label = "EDSC",
+        Theme = "@style/MyTheme.NoActionBar",
+        Icon = "@drawable/icon",
+        MainLauncher = true,
+        ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
+    public class MainActivity : AvaloniaMainActivity<App>
+    {
+        private IDiscoveryService _discoveryService;
+        private ConnectionViewModel _connectionViewModel;
+
+        protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
+        {
+            Debug.WriteLine("[MainActivity] Entry: CustomizeAppBuilder");
+
+            var appBuilder = base.CustomizeAppBuilder(builder)
+                .WithInterFont();
+
+            Debug.WriteLine("[MainActivity] Exit: CustomizeAppBuilder");
+            return appBuilder;
+        }
+
+        protected override void OnCreate(global::Android.OS.Bundle savedInstanceState)
+        {
+            Debug.WriteLine("[MainActivity] Entry: OnCreate");
+
+            base.OnCreate(savedInstanceState);
+
+            try
+            {
+                // Initialize discovery service
+                _discoveryService = new UdpDiscoveryService();
+                Debug.WriteLine("[MainActivity] Discovery service initialized");
+
+                // Initialize connection view model
+                _connectionViewModel = new ConnectionViewModel(_discoveryService);
+                Debug.WriteLine("[MainActivity] Connection view model initialized");
+
+                // TODO: Set up the connection view as the initial view
+                // var connectionView = new ConnectionView
+                // {
+                //     DataContext = _connectionViewModel
+                // };
+
+                // Optional: Auto-discover on startup
+                // This can be configurable based on user settings
+                bool autoDiscoverOnStartup = LoadAutoDiscoverSetting();
+                if (autoDiscoverOnStartup)
+                {
+                    Debug.WriteLine("[MainActivity] Auto-discover enabled, starting discovery");
+                    _ = _connectionViewModel.DiscoverServersAsync();
+                }
+                else
+                {
+                    Debug.WriteLine("[MainActivity] Auto-discover disabled");
+                }
+
+                Debug.WriteLine("[MainActivity] Activity created successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MainActivity] Error in OnCreate: {ex.Message}");
+            }
+
+            Debug.WriteLine("[MainActivity] Exit: OnCreate");
+        }
+
+        protected override void OnResume()
+        {
+            Debug.WriteLine("[MainActivity] Entry: OnResume");
+
+            base.OnResume();
+
+            Debug.WriteLine("[MainActivity] Exit: OnResume");
+        }
+
+        protected override void OnPause()
+        {
+            Debug.WriteLine("[MainActivity] Entry: OnPause");
+
+            base.OnPause();
+
+            // Cancel any ongoing discovery
+            if (_connectionViewModel != null)
+            {
+                Debug.WriteLine("[MainActivity] Cancelling discovery");
+                _connectionViewModel.CancelDiscovery();
+            }
+
+            Debug.WriteLine("[MainActivity] Exit: OnPause");
+        }
+
+        protected override void OnDestroy()
+        {
+            Debug.WriteLine("[MainActivity] Entry: OnDestroy");
+
+            base.OnDestroy();
+
+            // Cleanup resources
+            if (_connectionViewModel != null)
+            {
+                _connectionViewModel.CancelDiscovery();
+                _connectionViewModel = null;
+            }
+
+            _discoveryService = null;
+
+            Debug.WriteLine("[MainActivity] Exit: OnDestroy");
+        }
+
+        /// <summary>
+        /// Load auto-discover setting from preferences
+        /// </summary>
+        private bool LoadAutoDiscoverSetting()
+        {
+            Debug.WriteLine("[MainActivity] Entry: LoadAutoDiscoverSetting");
+
+            try
+            {
+                // TODO: Implement loading from SharedPreferences
+                // For now, return true by default
+                var autoDiscover = true;
+
+                Debug.WriteLine($"[MainActivity] Auto-discover setting: {autoDiscover}");
+                return autoDiscover;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[MainActivity] Error loading auto-discover setting: {ex.Message}");
+                return true;
+            }
+            finally
+            {
+                Debug.WriteLine("[MainActivity] Exit: LoadAutoDiscoverSetting");
+            }
+        }
+    }
+}

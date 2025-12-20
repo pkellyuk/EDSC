@@ -1,0 +1,38 @@
+# Build outputs
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sln.iml
+*.csproj.user
+
+# VS Code
+.vscode/
+
+# Logs and caches
+*.log
+*.cache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet packages
+*.nupkg
+packages/
+
+# Android artifacts
+*.apk
+*.aab
+*.keystore
+
+# Runtime config
+config.json

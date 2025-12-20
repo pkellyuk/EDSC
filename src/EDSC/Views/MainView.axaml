@@ -1,0 +1,114 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EDSC.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="400" d:DesignHeight="600"
+             x:Class="EDSC.Views.MainView"
+             x:DataType="vm:MainViewModel">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <!-- Header -->
+        <Border Grid.Row="0"
+                Background="#1E1E1E"
+                Padding="15,10">
+            <StackPanel Spacing="5">
+                <TextBlock Text="EDSC - Elite Dangerous"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="White"
+                           TextAlignment="Center"/>
+
+                <StackPanel Orientation="Horizontal"
+                           HorizontalAlignment="Center"
+                           Spacing="10">
+                    <Ellipse Width="10"
+                            Height="10"
+                            Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"/>
+                    <TextBlock Text="{Binding ConnectionStatus}"
+                              FontSize="12"
+                              Foreground="#CCCCCC"/>
+                </StackPanel>
+
+                <TextBlock Text="{Binding ServerAddress}"
+                          FontSize="10"
+                          Foreground="#999999"
+                          TextAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Button Grid -->
+        <ScrollViewer Grid.Row="1"
+                     Padding="10">
+            <ItemsControl ItemsSource="{Binding Buttons}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"
+                                  HorizontalAlignment="Center"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ButtonPressCommand}"
+                               CommandParameter="{Binding}"
+                               Width="120"
+                               Height="120"
+                               Margin="5"
+                               CornerRadius="10"
+                               Background="{Binding Color}"
+                               Foreground="White"
+                               FontWeight="Bold"
+                               FontSize="14"
+                               HorizontalContentAlignment="Center"
+                               VerticalContentAlignment="Center">
+                            <Button.Styles>
+                                <Style Selector="Button:pointerover">
+                                    <Setter Property="Opacity" Value="0.8"/>
+                                </Style>
+                                <Style Selector="Button:pressed">
+                                    <Setter Property="Opacity" Value="0.6"/>
+                                </Style>
+                            </Button.Styles>
+
+                            <StackPanel Spacing="5"
+                                       HorizontalAlignment="Center">
+                                <!-- Icon placeholder - replace with actual icon library -->
+                                <TextBlock Text="{Binding Icon}"
+                                          FontSize="24"
+                                          TextAlignment="Center"/>
+
+                                <TextBlock Text="{Binding Label}"
+                                          TextAlignment="Center"
+                                          TextWrapping="Wrap"
+                                          MaxWidth="100"/>
+
+                                <TextBlock Text="{Binding Key}"
+                                          FontSize="10"
+                                          Foreground="#EEEEEE"
+                                          TextAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="2"
+                Background="#2C2C2C"
+                Padding="15,10">
+            <TextBlock Text="{Binding StatusMessage}"
+                      FontSize="12"
+                      Foreground="White"
+                      TextAlignment="Center"
+                      TextWrapping="Wrap"/>
+        </Border>
+
+    </Grid>
+</UserControl>

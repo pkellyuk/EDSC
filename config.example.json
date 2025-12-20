@@ -1,0 +1,45 @@
+{
+  "server": {
+    "port": 5000,
+    "discoveryPort": 5001,
+    "autoStart": true,
+    "enableDiscovery": true
+  },
+  "buttons": [
+    {
+      "id": "shieldboost",
+      "key": "F1",
+      "icon": "shield",
+      "color": "#4CAF50",
+      "label": "Shield Boost"
+    },
+    {
+      "id": "ecm",
+      "key": "F2",
+      "icon": "flash",
+      "color": "#2196F3",
+      "label": "ECM"
+    },
+    {
+      "id": "chaff",
+      "key": "F3",
+      "icon": "smoke",
+      "color": "#FF9800",
+      "label": "Chaff"
+    },
+    {
+      "id": "heatsink",
+      "key": "F4",
+      "icon": "ac_unit",
+      "color": "#00BCD4",
+      "label": "Heat Sink"
+    },
+    {
+      "id": "fuelscoop",
+      "key": "F5",
+      "icon": "local_gas_station",
+      "color": "#9C27B0",
+      "label": "Fuel Scoop"
+    }
+  ]
+}
