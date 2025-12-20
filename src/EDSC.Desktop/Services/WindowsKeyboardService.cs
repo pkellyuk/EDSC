@@ -1,6 +1,8 @@
 using EDSC.Services;
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using WindowsInput;
 using WindowsInput.Native;
@@ -12,7 +14,15 @@ namespace EDSC.Desktop.Services
     /// </summary>
     public class WindowsKeyboardService : IKeyboardService
     {
+        private const uint InputKeyboard = 1;
+        private const uint KeyEventFlagExtendedKey = 0x0001;
+        private const uint KeyEventFlagKeyUp = 0x0002;
+        private const uint KeyEventFlagScanCode = 0x0008;
+        private const uint MapVkToVsc = 0x0000;
+        private const string LogFileName = "edsc.keyboard.log";
+
         private readonly InputSimulator _simulator;
+        private static readonly object LogLock = new object();
 
         public WindowsKeyboardService()
         {
@@ -26,6 +36,7 @@ namespace EDSC.Desktop.Services
         public Task SendKeyPressAsync(string key)
         {
             Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyPressAsync(key={key})");
+            LogToFile($"Entry: SendKeyPressAsync key={key}");
 
             if (string.IsNullOrEmpty(key))
             {
@@ -44,23 +55,34 @@ namespace EDSC.Desktop.Services
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Pressing key {key} (VK code: {virtualKey})");
-
-                _simulator.Keyboard.KeyPress(virtualKey.Value);
+                LogToFile($"Pressing key {key} (VK code: {virtualKey})");
+                var downSent = TrySendInput(virtualKey.Value, keyUp: false);
+                var upSent = TrySendInput(virtualKey.Value, keyUp: true);
+                if (!downSent || !upSent)
+                {
+                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key press: {key}");
+                    LogToFile($"Fallback InputSimulator KeyPress key={key}");
+                    _simulator.Keyboard.KeyPress(virtualKey.Value);
+                }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key {key} pressed successfully");
+                LogToFile($"Key {key} pressed successfully");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WindowsKeyboardService] Error pressing key: {ex.Message}");
+                LogToFile($"Error pressing key: {ex}");
             }
 
             Debug.WriteLine("[WindowsKeyboardService] Exit: SendKeyPressAsync");
+            LogToFile("Exit: SendKeyPressAsync");
             return Task.CompletedTask;
         }
 
         public Task SendKeyDownAsync(string key)
         {
             Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyDownAsync(key={key})");
+            LogToFile($"Entry: SendKeyDownAsync key={key}");
 
             if (string.IsNullOrEmpty(key))
             {
@@ -79,23 +101,32 @@ namespace EDSC.Desktop.Services
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key down: {key}");
-
-                _simulator.Keyboard.KeyDown(virtualKey.Value);
+                LogToFile($"Key down: {key}");
+                if (!TrySendInput(virtualKey.Value, keyUp: false))
+                {
+                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key down: {key}");
+                    LogToFile($"Fallback InputSimulator KeyDown key={key}");
+                    _simulator.Keyboard.KeyDown(virtualKey.Value);
+                }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key {key} down");
+                LogToFile($"Key {key} down");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WindowsKeyboardService] Error on key down: {ex.Message}");
+                LogToFile($"Error on key down: {ex}");
             }
 
             Debug.WriteLine("[WindowsKeyboardService] Exit: SendKeyDownAsync");
+            LogToFile("Exit: SendKeyDownAsync");
             return Task.CompletedTask;
         }
 
         public Task SendKeyUpAsync(string key)
         {
             Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyUpAsync(key={key})");
+            LogToFile($"Entry: SendKeyUpAsync key={key}");
 
             if (string.IsNullOrEmpty(key))
             {
@@ -114,17 +145,25 @@ namespace EDSC.Desktop.Services
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key up: {key}");
-
-                _simulator.Keyboard.KeyUp(virtualKey.Value);
+                LogToFile($"Key up: {key}");
+                if (!TrySendInput(virtualKey.Value, keyUp: true))
+                {
+                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key up: {key}");
+                    LogToFile($"Fallback InputSimulator KeyUp key={key}");
+                    _simulator.Keyboard.KeyUp(virtualKey.Value);
+                }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key {key} up");
+                LogToFile($"Key {key} up");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WindowsKeyboardService] Error on key up: {ex.Message}");
+                LogToFile($"Error on key up: {ex}");
             }
 
             Debug.WriteLine("[WindowsKeyboardService] Exit: SendKeyUpAsync");
+            LogToFile("Exit: SendKeyUpAsync");
             return Task.CompletedTask;
         }
 
@@ -186,6 +225,137 @@ namespace EDSC.Desktop.Services
             {
                 Debug.WriteLine("[WindowsKeyboardService] Exit: ParseKey");
             }
+        }
+
+        private static bool TrySendInput(VirtualKeyCode virtualKey, bool keyUp)
+        {
+            var vk = (ushort)virtualKey;
+            var scanCode = (ushort)MapVirtualKey(vk, MapVkToVsc);
+            var flags = keyUp ? KeyEventFlagKeyUp : 0u;
+
+            if (IsExtendedKey(virtualKey))
+            {
+                flags |= KeyEventFlagExtendedKey;
+            }
+
+            var useScanCode = scanCode != 0;
+            if (useScanCode)
+            {
+                flags |= KeyEventFlagScanCode;
+            }
+
+            Debug.WriteLine($"[WindowsKeyboardService] SendInput key={(VirtualKeyCode)vk}, scanCode={scanCode}, flags=0x{flags:X}");
+            LogToFile($"SendInput key={(VirtualKeyCode)vk}, scanCode={scanCode}, flags=0x{flags:X}, keyUp={keyUp}");
+
+            var input = new INPUT
+            {
+                type = InputKeyboard,
+                U = new InputUnion
+                {
+                    ki = new KEYBDINPUT
+                    {
+                        wVk = useScanCode ? (ushort)0 : vk,
+                        wScan = useScanCode ? scanCode : (ushort)0,
+                        dwFlags = flags,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
+                }
+            };
+
+            var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+            if (sent == 0)
+            {
+                Debug.WriteLine($"[WindowsKeyboardService] SendInput failed (win32={Marshal.GetLastWin32Error()})");
+                LogToFile($"SendInput failed (win32={Marshal.GetLastWin32Error()})");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void LogToFile(string message)
+        {
+            try
+            {
+                var logPath = Path.Combine(AppContext.BaseDirectory, LogFileName);
+                var line = $"{DateTime.UtcNow:O} {message}{Environment.NewLine}";
+                lock (LogLock)
+                {
+                    File.AppendAllText(logPath, line);
+                }
+            }
+            catch
+            {
+                // Swallow logging failures to avoid breaking key send path.
+            }
+        }
+
+        private static bool IsExtendedKey(VirtualKeyCode virtualKey)
+        {
+            return virtualKey switch
+            {
+                VirtualKeyCode.RMENU => true,
+                VirtualKeyCode.RCONTROL => true,
+                VirtualKeyCode.INSERT => true,
+                VirtualKeyCode.DELETE => true,
+                VirtualKeyCode.HOME => true,
+                VirtualKeyCode.END => true,
+                VirtualKeyCode.PRIOR => true,
+                VirtualKeyCode.NEXT => true,
+                VirtualKeyCode.LEFT => true,
+                VirtualKeyCode.RIGHT => true,
+                VirtualKeyCode.UP => true,
+                VirtualKeyCode.DOWN => true,
+                VirtualKeyCode.NUMLOCK => true,
+                VirtualKeyCode.DIVIDE => true,
+                VirtualKeyCode.SNAPSHOT => true,
+                _ => false
+            };
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll")]
+        private static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct INPUT
+        {
+            public uint type;
+            public InputUnion U;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
+        {
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
         }
     }
 }
