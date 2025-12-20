@@ -256,6 +256,18 @@ namespace EDSC.Desktop.Services
       margin-bottom: 16px;
       font-size: 13px;
     }
+    .category {
+      background: var(--card);
+      border: 1px solid #2a313d;
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+    .category h2 {
+      margin: 0 0 10px 0;
+      font-size: 15px;
+      color: #e6e9ef;
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -303,7 +315,7 @@ namespace EDSC.Desktop.Services
     <div class=""toolbar"">
       <button id=""reload"">Reload config</button>
     </div>
-    <div class=""grid"" id=""grid""></div>
+    <div id=""grid""></div>
   </main>
   <script>
     const statusEl = document.getElementById('status');
@@ -322,15 +334,38 @@ namespace EDSC.Desktop.Services
           return;
         }
         statusEl.textContent = `Loaded ${buttons.length} buttons`;
+        const groups = new Map();
+        const order = [];
         for (const button of buttons) {
-          const btn = document.createElement('button');
-          btn.className = 'btn';
-          btn.style.background = button.color || '#4caf50';
-          btn.style.width = (button.size || 80) + 'px';
-          btn.style.height = (button.size || 80) + 'px';
-          btn.innerHTML = `<div>${button.label || button.id}</div><small>${button.key || ''}</small>`;
-          btn.addEventListener('click', () => sendCommand(button));
-          gridEl.appendChild(btn);
+          const category = (button.category && button.category.trim()) ? button.category.trim() : 'General';
+          if (!groups.has(category)) {
+            groups.set(category, []);
+            order.push(category);
+          }
+          groups.get(category).push(button);
+        }
+        for (const category of order) {
+          const section = document.createElement('section');
+          section.className = 'category';
+
+          const title = document.createElement('h2');
+          title.textContent = category;
+          section.appendChild(title);
+
+          const grid = document.createElement('div');
+          grid.className = 'grid';
+          for (const button of groups.get(category)) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.style.background = button.color || '#4caf50';
+            btn.style.width = (button.size || 80) + 'px';
+            btn.style.height = (button.size || 80) + 'px';
+            btn.innerHTML = `<div>${button.label || button.id}</div><small>${button.key || ''}</small>`;
+            btn.addEventListener('click', () => sendCommand(button));
+            grid.appendChild(btn);
+          }
+          section.appendChild(grid);
+          gridEl.appendChild(section);
         }
       } catch (err) {
         statusEl.textContent = 'Failed to load config.';

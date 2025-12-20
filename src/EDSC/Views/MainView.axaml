@@ -5,7 +5,8 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="400" d:DesignHeight="600"
              x:Class="EDSC.Views.MainView"
-             x:DataType="vm:MainViewModel">
+             x:DataType="vm:MainViewModel"
+             x:Name="Root">
 
     <Design.DataContext>
         <vm:MainViewModel />
@@ -45,55 +46,82 @@
         <!-- Button Grid -->
         <ScrollViewer Grid.Row="1"
                      Padding="10">
-            <ItemsControl ItemsSource="{Binding Buttons}">
+            <ItemsControl ItemsSource="{Binding Categories}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal"
-                                  HorizontalAlignment="Center"/>
+                        <StackPanel />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
 
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Button Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ButtonPressCommand}"
-                               CommandParameter="{Binding}"
-                               Width="120"
-                               Height="120"
-                               Margin="5"
-                               CornerRadius="10"
-                               Background="{Binding Color}"
-                               Foreground="White"
-                               FontWeight="Bold"
-                               FontSize="14"
-                               HorizontalContentAlignment="Center"
-                               VerticalContentAlignment="Center">
-                            <Button.Styles>
-                                <Style Selector="Button:pointerover">
-                                    <Setter Property="Opacity" Value="0.8"/>
-                                </Style>
-                                <Style Selector="Button:pressed">
-                                    <Setter Property="Opacity" Value="0.6"/>
-                                </Style>
-                            </Button.Styles>
+                        <Border Margin="0,0,0,15"
+                                Padding="10"
+                                Background="#262626"
+                                BorderBrush="#3A3A3A"
+                                BorderThickness="1"
+                                CornerRadius="12">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="{Binding Name}"
+                                           FontSize="16"
+                                           FontWeight="Bold"
+                                           Foreground="#E5E7EB"
+                                           Margin="2,0,2,2"/>
 
-                            <StackPanel Spacing="5"
-                                       HorizontalAlignment="Center">
-                                <!-- Icon placeholder - replace with actual icon library -->
-                                <TextBlock Text="{Binding Icon}"
-                                          FontSize="24"
-                                          TextAlignment="Center"/>
+                                <ItemsControl ItemsSource="{Binding Buttons}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"
+                                                      HorizontalAlignment="Center"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
 
-                                <TextBlock Text="{Binding Label}"
-                                          TextAlignment="Center"
-                                          TextWrapping="Wrap"
-                                          MaxWidth="100"/>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:CompileBindings="False">
+                                            <Button Command="{Binding DataContext.ButtonPressCommand, ElementName=Root}"
+                                                   CommandParameter="{Binding}"
+                                                   Width="120"
+                                                   Height="120"
+                                                   Margin="5"
+                                                   CornerRadius="10"
+                                                   Background="{Binding Color}"
+                                                   Foreground="White"
+                                                   FontWeight="Bold"
+                                                   FontSize="14"
+                                                   HorizontalContentAlignment="Center"
+                                                   VerticalContentAlignment="Center">
+                                                <Button.Styles>
+                                                    <Style Selector="Button:pointerover">
+                                                        <Setter Property="Opacity" Value="0.8"/>
+                                                    </Style>
+                                                    <Style Selector="Button:pressed">
+                                                        <Setter Property="Opacity" Value="0.6"/>
+                                                    </Style>
+                                                </Button.Styles>
 
-                                <TextBlock Text="{Binding Key}"
-                                          FontSize="10"
-                                          Foreground="#EEEEEE"
-                                          TextAlignment="Center"/>
+                                                <StackPanel Spacing="5"
+                                                           HorizontalAlignment="Center">
+                                                    <!-- Icon placeholder - replace with actual icon library -->
+                                                    <TextBlock Text="{Binding Icon}"
+                                                              FontSize="24"
+                                                              TextAlignment="Center"/>
+
+                                                    <TextBlock Text="{Binding Label}"
+                                                              TextAlignment="Center"
+                                                              TextWrapping="Wrap"
+                                                              MaxWidth="100"/>
+
+                                                    <TextBlock Text="{Binding Key}"
+                                                              FontSize="10"
+                                                              Foreground="#EEEEEE"
+                                                              TextAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
-                        </Button>
+                        </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

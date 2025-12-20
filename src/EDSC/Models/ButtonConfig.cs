@@ -22,6 +22,9 @@ namespace EDSC.Models
         [JsonPropertyName("label")]
         public string Label { get; set; }
 
+        [JsonPropertyName("category")]
+        public string Category { get; set; }
+
         [JsonPropertyName("size")]
         public int Size { get; set; }
 
@@ -32,6 +35,7 @@ namespace EDSC.Models
             Icon = string.Empty;
             Color = "#4CAF50"; // Default green
             Label = string.Empty;
+            Category = "General";
             Size = 80; // Default size
         }
 

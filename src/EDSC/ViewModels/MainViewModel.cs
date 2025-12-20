@@ -18,6 +18,7 @@ namespace EDSC.ViewModels
         private readonly ICommandClient _commandClient;
         private readonly IConfigurationService _configService;
         private ObservableCollection<ButtonConfig> _buttons;
+        private ObservableCollection<ButtonCategoryGroup> _categories;
         private string _statusMessage;
         private bool _isConnected;
         private string _serverAddress;
@@ -41,6 +42,28 @@ namespace EDSC.ViewModels
 
                 _buttons = value;
                 OnPropertyChanged(nameof(Buttons));
+            }
+        }
+
+        public ObservableCollection<ButtonCategoryGroup> Categories
+        {
+            get
+            {
+                if (_categories == null)
+                {
+                    return new ObservableCollection<ButtonCategoryGroup>();
+                }
+                return _categories;
+            }
+            set
+            {
+                if (_categories == value)
+                {
+                    return;
+                }
+
+                _categories = value;
+                OnPropertyChanged(nameof(Categories));
             }
         }
 
@@ -128,6 +151,7 @@ namespace EDSC.ViewModels
             _commandClient = commandClient;
             _configService = configService;
             _buttons = new ObservableCollection<ButtonConfig>();
+            _categories = new ObservableCollection<ButtonCategoryGroup>();
             _statusMessage = "Initializing...";
             _isConnected = false;
             _serverAddress = string.Empty;
@@ -176,6 +200,7 @@ namespace EDSC.ViewModels
 
                 // Populate buttons
                 Buttons.Clear();
+                Categories.Clear();
                 foreach (var button in config.Buttons)
                 {
                     if (button == null)
@@ -187,8 +212,18 @@ namespace EDSC.ViewModels
                     Debug.WriteLine($"[MainViewModel] Added button: {button}");
                 }
 
+                var groupedButtons = Buttons
+                    .GroupBy(button => string.IsNullOrWhiteSpace(button.Category) ? "General" : button.Category.Trim())
+                    .OrderBy(group => group.Key);
+
+                foreach (var group in groupedButtons)
+                {
+                    Categories.Add(new ButtonCategoryGroup(group.Key, group.ToList()));
+                    Debug.WriteLine($"[MainViewModel] Added category: {group.Key} ({group.Count()} buttons)");
+                }
+
                 StatusMessage = $"Ready - {Buttons.Count} buttons loaded";
-                Debug.WriteLine($"[MainViewModel] Loaded {Buttons.Count} buttons");
+                Debug.WriteLine($"[MainViewModel] Loaded {Buttons.Count} buttons in {Categories.Count} categories");
             }
             catch (Exception ex)
             {
@@ -319,6 +354,18 @@ namespace EDSC.ViewModels
         public void RaiseCanExecuteChanged()
         {
             CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public class ButtonCategoryGroup
+    {
+        public string Name { get; }
+        public ObservableCollection<ButtonConfig> Buttons { get; }
+
+        public ButtonCategoryGroup(string name, IEnumerable<ButtonConfig> buttons)
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? "General" : name.Trim();
+            Buttons = new ObservableCollection<ButtonConfig>(buttons ?? Enumerable.Empty<ButtonConfig>());
         }
     }
 }

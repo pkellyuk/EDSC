@@ -10,12 +10,5 @@
         MinHeight="640"
         Title="EDSC"
         WindowStartupLocation="CenterScreen">
-    <TabControl>
-        <TabItem Header="Connection">
-            <views:ConnectionView DataContext="{Binding Connection}" />
-        </TabItem>
-        <TabItem Header="Controls">
-            <views:MainView DataContext="{Binding Controls}" />
-        </TabItem>
-    </TabControl>
+    <views:ConnectionView DataContext="{Binding Connection}" />
 </Window>

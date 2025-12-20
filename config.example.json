@@ -9,6 +9,7 @@
       "key": "U",
       "icon": "build",
       "color": "#6B7280",
+      "category": "Combat",
       "label": "Hardpoints"
     },
     {
@@ -16,6 +17,7 @@
       "key": "L",
       "icon": "flight_land",
       "color": "#4B5563",
+      "category": "Ship Control",
       "label": "Landing Gear"
     },
     {
@@ -23,6 +25,7 @@
       "key": "HOME",
       "icon": "inbox",
       "color": "#92400E",
+      "category": "Ship Control",
       "label": "Cargo Scoop"
     },
     {
@@ -30,6 +33,7 @@
       "key": "DELETE",
       "icon": "visibility_off",
       "color": "#7C3AED",
+      "category": "Combat",
       "label": "Silent Running"
     },
     {
@@ -37,6 +41,7 @@
       "key": "J",
       "icon": "travel_explore",
       "color": "#2563EB",
+      "category": "Navigation",
       "label": "FSD Jump"
     },
     {
@@ -44,6 +49,7 @@
       "key": "OEM_PLUS",
       "icon": "timeline",
       "color": "#0EA5E9",
+      "category": "Navigation",
       "label": "Orbit Lines"
     },
     {
@@ -51,6 +57,7 @@
       "key": "T",
       "icon": "gps_fixed",
       "color": "#10B981",
+      "category": "Targeting",
       "label": "Target Ahead"
     },
     {
@@ -58,6 +65,7 @@
       "key": "G",
       "icon": "my_location",
       "color": "#059669",
+      "category": "Targeting",
       "label": "Next Target"
     },
     {
@@ -65,6 +73,7 @@
       "key": "H",
       "icon": "priority_high",
       "color": "#DC2626",
+      "category": "Targeting",
       "label": "Highest Threat"
     },
     {
@@ -72,6 +81,7 @@
       "key": "Y",
       "icon": "swap_horiz",
       "color": "#F59E0B",
+      "category": "Combat",
       "label": "Next Subsystem"
     },
     {
@@ -79,6 +89,7 @@
       "key": "N",
       "icon": "layers",
       "color": "#F97316",
+      "category": "Combat",
       "label": "Next Fire Group"
     },
     {
@@ -86,6 +97,7 @@
       "key": "Z",
       "icon": "alt_route",
       "color": "#14B8A6",
+      "category": "Ship Control",
       "label": "Flight Assist"
     },
     {
@@ -93,6 +105,7 @@
       "key": "X",
       "icon": "exposure_zero",
       "color": "#0F766E",
+      "category": "Ship Control",
       "label": "Speed 0%"
     },
     {
@@ -100,6 +113,7 @@
       "key": "1",
       "icon": "filter_1",
       "color": "#1D4ED8",
+      "category": "Panels",
       "label": "Left Panel"
     },
     {
@@ -107,6 +121,7 @@
       "key": "2",
       "icon": "filter_2",
       "color": "#1E40AF",
+      "category": "Panels",
       "label": "Comms Panel"
     },
     {
@@ -114,6 +129,7 @@
       "key": "3",
       "icon": "filter_3",
       "color": "#1E3A8A",
+      "category": "Panels",
       "label": "Radar Panel"
     },
     {
@@ -121,6 +137,7 @@
       "key": "4",
       "icon": "filter_4",
       "color": "#1E3A8A",
+      "category": "Panels",
       "label": "Right Panel"
     },
     {
@@ -128,6 +145,7 @@
       "key": "ENTER",
       "icon": "sms",
       "color": "#374151",
+      "category": "Panels",
       "label": "Quick Comms"
     },
     {
@@ -135,6 +153,7 @@
       "key": "M",
       "icon": "visibility",
       "color": "#6D28D9",
+      "category": "Display",
       "label": "HUD Mode"
     }
   ]
