@@ -10,7 +10,9 @@
       "icon": "build",
       "color": "#6B7280",
       "label": "Hardpoints",
-      "size": 80
+      "size": 80,
+      "category": "Combat",
+      "iconSvg": "hardpoints.svg"
     },
     {
       "id": "landinggear",
@@ -18,7 +20,9 @@
       "icon": "flight_land",
       "color": "#4B5563",
       "label": "Landing Gear",
-      "size": 80
+      "size": 80,
+      "category": "Ship Control",
+      "iconSvg": "landinggear.svg"
     },
     {
       "id": "cargoscoop",
@@ -26,7 +30,9 @@
       "icon": "inbox",
       "color": "#92400E",
       "label": "Cargo Scoop",
-      "size": 80
+      "size": 80,
+      "category": "Ship Control",
+      "iconSvg": "cargoscoop.svg"
     },
     {
       "id": "silentrunning",
@@ -34,7 +40,9 @@
       "icon": "visibility_off",
       "color": "#7C3AED",
       "label": "Silent Running",
-      "size": 80
+      "size": 80,
+      "category": "Combat",
+      "iconSvg": "silentrunning.svg"
     },
     {
       "id": "fsd",
@@ -42,7 +50,9 @@
       "icon": "travel_explore",
       "color": "#2563EB",
       "label": "FSD Jump",
-      "size": 80
+      "size": 80,
+      "category": "Navigation",
+      "iconSvg": "fsd.svg"
     },
     {
       "id": "orbitlines",
@@ -50,7 +60,9 @@
       "icon": "timeline",
       "color": "#0EA5E9",
       "label": "Orbit Lines",
-      "size": 80
+      "size": 80,
+      "category": "Navigation",
+      "iconSvg": "orbitlines.svg"
     },
     {
       "id": "targetahead",
@@ -58,7 +70,9 @@
       "icon": "gps_fixed",
       "color": "#10B981",
       "label": "Target Ahead",
-      "size": 80
+      "size": 80,
+      "category": "Targeting",
+      "iconSvg": "targetahead.svg"
     },
     {
       "id": "nexttarget",
@@ -66,7 +80,9 @@
       "icon": "my_location",
       "color": "#059669",
       "label": "Next Target",
-      "size": 80
+      "size": 80,
+      "category": "Targeting",
+      "iconSvg": "nexttarget.svg"
     },
     {
       "id": "highestthreat",
@@ -74,7 +90,9 @@
       "icon": "priority_high",
       "color": "#DC2626",
       "label": "Highest Threat",
-      "size": 80
+      "size": 80,
+      "category": "Targeting",
+      "iconSvg": "highestthreat.svg"
     },
     {
       "id": "nextsubsystem",
@@ -82,7 +100,9 @@
       "icon": "swap_horiz",
       "color": "#F59E0B",
       "label": "Next Subsystem",
-      "size": 80
+      "size": 80,
+      "category": "Combat",
+      "iconSvg": "nextsubsystem.svg"
     },
     {
       "id": "nextfiregroup",
@@ -90,7 +110,9 @@
       "icon": "layers",
       "color": "#F97316",
       "label": "Next Fire Group",
-      "size": 80
+      "size": 80,
+      "category": "Combat",
+      "iconSvg": "nextfiregroup.svg"
     },
     {
       "id": "flightassist",
@@ -98,7 +120,9 @@
       "icon": "alt_route",
       "color": "#14B8A6",
       "label": "Flight Assist",
-      "size": 80
+      "size": 80,
+      "category": "Ship Control",
+      "iconSvg": "flightassist.svg"
     },
     {
       "id": "setzero",
@@ -106,7 +130,9 @@
       "icon": "exposure_zero",
       "color": "#0F766E",
       "label": "Speed 0%",
-      "size": 80
+      "size": 80,
+      "category": "Ship Control",
+      "iconSvg": "speed0.svg"
     },
     {
       "id": "leftpanel",
@@ -114,7 +140,9 @@
       "icon": "filter_1",
       "color": "#1D4ED8",
       "label": "Left Panel",
-      "size": 80
+      "size": 80,
+      "category": "Panels",
+      "iconSvg": "leftpanel.svg"
     },
     {
       "id": "commspanel",
@@ -122,7 +150,9 @@
       "icon": "filter_2",
       "color": "#1E40AF",
       "label": "Comms Panel",
-      "size": 80
+      "size": 80,
+      "category": "Panels",
+      "iconSvg": "commspanel.svg"
     },
     {
       "id": "radarpanel",
@@ -130,7 +160,9 @@
       "icon": "filter_3",
       "color": "#1E3A8A",
       "label": "Radar Panel",
-      "size": 80
+      "size": 80,
+      "category": "Panels",
+      "iconSvg": "radarpanel.svg"
     },
     {
       "id": "rightpanel",
@@ -138,7 +170,9 @@
       "icon": "filter_4",
       "color": "#1E3A8A",
       "label": "Right Panel",
-      "size": 80
+      "size": 80,
+      "category": "Panels",
+      "iconSvg": "rightpanel.svg"
     },
     {
       "id": "quickcomms",
@@ -146,7 +180,9 @@
       "icon": "sms",
       "color": "#374151",
       "label": "Quick Comms",
-      "size": 80
+      "size": 80,
+      "category": "Panels",
+      "iconSvg": "quickcomms.svg"
     },
     {
       "id": "hudmode",
@@ -154,7 +190,9 @@
       "icon": "visibility",
       "color": "#6D28D9",
       "label": "HUD Mode",
-      "size": 80
+      "size": 80,
+      "category": "Display",
+      "iconSvg": "hudmode.svg"
     },
     {
       "id": "wingman1",
@@ -162,7 +200,9 @@
       "icon": "group",
       "color": "#2563EB",
       "label": "Wingman 1",
-      "size": 80
+      "size": 80,
+      "category": "Wing",
+      "iconSvg": "wingman.svg"
     },
     {
       "id": "wingman2",
@@ -170,7 +210,9 @@
       "icon": "group",
       "color": "#1D4ED8",
       "label": "Wingman 2",
-      "size": 80
+      "size": 80,
+      "category": "Wing",
+      "iconSvg": "wingman.svg"
     },
     {
       "id": "wingman3",
@@ -178,7 +220,9 @@
       "icon": "group",
       "color": "#1E40AF",
       "label": "Wingman 3",
-      "size": 80
+      "size": 80,
+      "category": "Wing",
+      "iconSvg": "wingman.svg"
     },
     {
       "id": "wingmantarget",
@@ -186,7 +230,9 @@
       "icon": "assistant",
       "color": "#312E81",
       "label": "Wingman Target",
-      "size": 80
+      "size": 80,
+      "category": "Wing",
+      "iconSvg": "wingmantarget.svg"
     },
     {
       "id": "wingnavlock",
@@ -194,7 +240,49 @@
       "icon": "link",
       "color": "#4B5563",
       "label": "Wing Nav Lock",
-      "size": 80
+      "size": 80,
+      "category": "Wing",
+      "iconSvg": "wingnavlock.svg"
+    },
+    {
+      "key": "NUMPAD5",
+      "label": "Speed 50%",
+      "size": 80,
+      "color": "#0F766E",
+      "id": "setfifty",
+      "icon": "speed_50",
+      "iconSvg": "speed50.svg",
+      "category": "Ship Control"
+    },
+    {
+      "key": "NUMPAD0",
+      "label": "Speed 100%",
+      "size": 80,
+      "color": "#0F766E",
+      "id": "sethundred",
+      "icon": "speed_100",
+      "iconSvg": "speed100.svg",
+      "category": "Ship Control"
+    },
+    {
+      "key": "C",
+      "label": "Chaff",
+      "size": 80,
+      "color": "#DC2626",
+      "id": "chaff",
+      "icon": "burst",
+      "iconSvg": "chaff.svg",
+      "category": "Combat"
+    },
+    {
+      "key": "B",
+      "label": "Shield Booster",
+      "size": 80,
+      "color": "#2563EB",
+      "id": "shieldbooster",
+      "icon": "shield",
+      "iconSvg": "shieldbooster.svg",
+      "category": "Combat"
     }
   ]
 }

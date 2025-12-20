@@ -22,4 +22,10 @@
   <ItemGroup>
     <ProjectReference Include="..\EDSC\EDSC.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\Icons\*.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

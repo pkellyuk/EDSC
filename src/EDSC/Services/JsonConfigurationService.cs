@@ -145,8 +145,10 @@ namespace EDSC.Services
                         Id = "hardpoints",
                         Key = "U",
                         Icon = "build",
+                        IconSvg = "hardpoints.svg",
                         Color = "#6B7280",
                         Label = "Hardpoints",
+                        Category = "Combat",
                         Size = 80
                     },
                     new ButtonConfig
@@ -154,8 +156,10 @@ namespace EDSC.Services
                         Id = "landinggear",
                         Key = "L",
                         Icon = "flight_land",
+                        IconSvg = "landinggear.svg",
                         Color = "#4B5563",
                         Label = "Landing Gear",
+                        Category = "Ship Control",
                         Size = 80
                     },
                     new ButtonConfig
@@ -163,8 +167,10 @@ namespace EDSC.Services
                         Id = "cargoscoop",
                         Key = "HOME",
                         Icon = "inbox",
+                        IconSvg = "cargoscoop.svg",
                         Color = "#92400E",
                         Label = "Cargo Scoop",
+                        Category = "Ship Control",
                         Size = 80
                     },
                     new ButtonConfig
@@ -172,8 +178,32 @@ namespace EDSC.Services
                         Id = "silentrunning",
                         Key = "DELETE",
                         Icon = "visibility_off",
+                        IconSvg = "silentrunning.svg",
                         Color = "#7C3AED",
                         Label = "Silent Running",
+                        Category = "Combat",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "chaff",
+                        Key = "C",
+                        Icon = "burst",
+                        IconSvg = "chaff.svg",
+                        Color = "#DC2626",
+                        Label = "Chaff",
+                        Category = "Combat",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "shieldbooster",
+                        Key = "B",
+                        Icon = "shield",
+                        IconSvg = "shieldbooster.svg",
+                        Color = "#2563EB",
+                        Label = "Shield Booster",
+                        Category = "Combat",
                         Size = 80
                     },
                     new ButtonConfig
@@ -181,8 +211,10 @@ namespace EDSC.Services
                         Id = "fsd",
                         Key = "J",
                         Icon = "travel_explore",
+                        IconSvg = "fsd.svg",
                         Color = "#2563EB",
                         Label = "FSD Jump",
+                        Category = "Navigation",
                         Size = 80
                     },
                     new ButtonConfig
@@ -190,8 +222,10 @@ namespace EDSC.Services
                         Id = "orbitlines",
                         Key = "OEM_PLUS",
                         Icon = "timeline",
+                        IconSvg = "orbitlines.svg",
                         Color = "#0EA5E9",
                         Label = "Orbit Lines",
+                        Category = "Navigation",
                         Size = 80
                     },
                     new ButtonConfig
@@ -199,8 +233,10 @@ namespace EDSC.Services
                         Id = "targetahead",
                         Key = "T",
                         Icon = "gps_fixed",
+                        IconSvg = "targetahead.svg",
                         Color = "#10B981",
                         Label = "Target Ahead",
+                        Category = "Targeting",
                         Size = 80
                     },
                     new ButtonConfig
@@ -208,8 +244,10 @@ namespace EDSC.Services
                         Id = "nexttarget",
                         Key = "G",
                         Icon = "my_location",
+                        IconSvg = "nexttarget.svg",
                         Color = "#059669",
                         Label = "Next Target",
+                        Category = "Targeting",
                         Size = 80
                     },
                     new ButtonConfig
@@ -217,8 +255,10 @@ namespace EDSC.Services
                         Id = "highestthreat",
                         Key = "H",
                         Icon = "priority_high",
+                        IconSvg = "highestthreat.svg",
                         Color = "#DC2626",
                         Label = "Highest Threat",
+                        Category = "Targeting",
                         Size = 80
                     },
                     new ButtonConfig
@@ -226,8 +266,10 @@ namespace EDSC.Services
                         Id = "nextsubsystem",
                         Key = "Y",
                         Icon = "swap_horiz",
+                        IconSvg = "nextsubsystem.svg",
                         Color = "#F59E0B",
                         Label = "Next Subsystem",
+                        Category = "Combat",
                         Size = 80
                     },
                     new ButtonConfig
@@ -235,8 +277,10 @@ namespace EDSC.Services
                         Id = "nextfiregroup",
                         Key = "N",
                         Icon = "layers",
+                        IconSvg = "nextfiregroup.svg",
                         Color = "#F97316",
                         Label = "Next Fire Group",
+                        Category = "Combat",
                         Size = 80
                     },
                     new ButtonConfig
@@ -244,8 +288,10 @@ namespace EDSC.Services
                         Id = "flightassist",
                         Key = "Z",
                         Icon = "alt_route",
+                        IconSvg = "flightassist.svg",
                         Color = "#14B8A6",
                         Label = "Flight Assist",
+                        Category = "Ship Control",
                         Size = 80
                     },
                     new ButtonConfig
@@ -253,8 +299,32 @@ namespace EDSC.Services
                         Id = "setzero",
                         Key = "X",
                         Icon = "exposure_zero",
+                        IconSvg = "speed0.svg",
                         Color = "#0F766E",
                         Label = "Speed 0%",
+                        Category = "Ship Control",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "setfifty",
+                        Key = "NUMPAD5",
+                        Icon = "speed_50",
+                        IconSvg = "speed50.svg",
+                        Color = "#0F766E",
+                        Label = "Speed 50%",
+                        Category = "Ship Control",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "sethundred",
+                        Key = "NUMPAD0",
+                        Icon = "speed_100",
+                        IconSvg = "speed100.svg",
+                        Color = "#0F766E",
+                        Label = "Speed 100%",
+                        Category = "Ship Control",
                         Size = 80
                     },
                     new ButtonConfig
@@ -262,8 +332,10 @@ namespace EDSC.Services
                         Id = "leftpanel",
                         Key = "1",
                         Icon = "filter_1",
+                        IconSvg = "leftpanel.svg",
                         Color = "#1D4ED8",
                         Label = "Left Panel",
+                        Category = "Panels",
                         Size = 80
                     },
                     new ButtonConfig
@@ -271,8 +343,10 @@ namespace EDSC.Services
                         Id = "commspanel",
                         Key = "2",
                         Icon = "filter_2",
+                        IconSvg = "commspanel.svg",
                         Color = "#1E40AF",
                         Label = "Comms Panel",
+                        Category = "Panels",
                         Size = 80
                     },
                     new ButtonConfig
@@ -280,8 +354,10 @@ namespace EDSC.Services
                         Id = "radarpanel",
                         Key = "3",
                         Icon = "filter_3",
+                        IconSvg = "radarpanel.svg",
                         Color = "#1E3A8A",
                         Label = "Radar Panel",
+                        Category = "Panels",
                         Size = 80
                     },
                     new ButtonConfig
@@ -289,8 +365,10 @@ namespace EDSC.Services
                         Id = "rightpanel",
                         Key = "4",
                         Icon = "filter_4",
+                        IconSvg = "rightpanel.svg",
                         Color = "#1E3A8A",
                         Label = "Right Panel",
+                        Category = "Panels",
                         Size = 80
                     },
                     new ButtonConfig
@@ -298,8 +376,10 @@ namespace EDSC.Services
                         Id = "quickcomms",
                         Key = "ENTER",
                         Icon = "sms",
+                        IconSvg = "quickcomms.svg",
                         Color = "#374151",
                         Label = "Quick Comms",
+                        Category = "Panels",
                         Size = 80
                     },
                     new ButtonConfig
@@ -307,8 +387,65 @@ namespace EDSC.Services
                         Id = "hudmode",
                         Key = "M",
                         Icon = "visibility",
+                        IconSvg = "hudmode.svg",
                         Color = "#6D28D9",
                         Label = "HUD Mode",
+                        Category = "Display",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "wingman1",
+                        Key = "7",
+                        Icon = "group",
+                        IconSvg = "wingman.svg",
+                        Color = "#2563EB",
+                        Label = "Wingman 1",
+                        Category = "Wing",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "wingman2",
+                        Key = "8",
+                        Icon = "group",
+                        IconSvg = "wingman.svg",
+                        Color = "#1D4ED8",
+                        Label = "Wingman 2",
+                        Category = "Wing",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "wingman3",
+                        Key = "9",
+                        Icon = "group",
+                        IconSvg = "wingman.svg",
+                        Color = "#1E40AF",
+                        Label = "Wingman 3",
+                        Category = "Wing",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "wingmantarget",
+                        Key = "0",
+                        Icon = "assistant",
+                        IconSvg = "wingmantarget.svg",
+                        Color = "#312E81",
+                        Label = "Wingman Target",
+                        Category = "Wing",
+                        Size = 80
+                    },
+                    new ButtonConfig
+                    {
+                        Id = "wingnavlock",
+                        Key = "OEM_MINUS",
+                        Icon = "link",
+                        IconSvg = "wingnavlock.svg",
+                        Color = "#4B5563",
+                        Label = "Wing Nav Lock",
+                        Category = "Wing",
                         Size = 80
                     }
                 },

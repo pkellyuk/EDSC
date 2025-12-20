@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -104,6 +105,10 @@ namespace EDSC.Desktop.Services
                                 else if (context.Request.Path == "/web" && context.Request.Method == "GET")
                                 {
                                     await HandleWebUiRequest(context);
+                                }
+                                else if (context.Request.Path.StartsWithSegments("/assets/icons", out var remaining) && context.Request.Method == "GET")
+                                {
+                                    await HandleIconRequest(context, remaining.Value);
                                 }
                                 else if (context.Request.Path == "/command" && context.Request.Method == "POST")
                                 {
@@ -283,6 +288,16 @@ namespace EDSC.Desktop.Services
       text-align: center;
       background: var(--accent);
     }
+    .btn .icon {
+      display: block;
+      height: 28px;
+      margin: 0 auto 6px auto;
+    }
+    .btn .icon svg {
+      width: 28px;
+      height: 28px;
+      display: block;
+    }
     .btn small {
       display: block;
       font-weight: 400;
@@ -314,6 +329,7 @@ namespace EDSC.Desktop.Services
     <div class=""status"" id=""status"">Loading buttons...</div>
     <div class=""toolbar"">
       <button id=""reload"">Reload config</button>
+      <button id=""fullscreen"">Fullscreen</button>
     </div>
     <div id=""grid""></div>
   </main>
@@ -321,6 +337,28 @@ namespace EDSC.Desktop.Services
     const statusEl = document.getElementById('status');
     const gridEl = document.getElementById('grid');
     const reloadBtn = document.getElementById('reload');
+    const fullscreenBtn = document.getElementById('fullscreen');
+    const iconCache = new Map();
+
+    async function getIconMarkup(name) {
+      if (!name) {
+        return '';
+      }
+      if (iconCache.has(name)) {
+        return iconCache.get(name);
+      }
+      try {
+        const res = await fetch(`/assets/icons/${encodeURIComponent(name)}`);
+        if (!res.ok) {
+          return '';
+        }
+        const svg = await res.text();
+        iconCache.set(name, svg);
+        return svg;
+      } catch (err) {
+        return '';
+      }
+    }
 
     async function loadConfig() {
       statusEl.textContent = 'Loading buttons...';
@@ -360,7 +398,25 @@ namespace EDSC.Desktop.Services
             btn.style.background = button.color || '#4caf50';
             btn.style.width = (button.size || 80) + 'px';
             btn.style.height = (button.size || 80) + 'px';
-            btn.innerHTML = `<div>${button.label || button.id}</div><small>${button.key || ''}</small>`;
+            const iconWrap = document.createElement('div');
+            iconWrap.className = 'icon';
+            if (button.iconSvg) {
+              getIconMarkup(button.iconSvg).then(svg => {
+                if (svg) {
+                  iconWrap.innerHTML = svg;
+                }
+              });
+            }
+
+            const label = document.createElement('div');
+            label.textContent = button.label || button.id;
+
+            const key = document.createElement('small');
+            key.textContent = button.key || '';
+
+            btn.appendChild(iconWrap);
+            btn.appendChild(label);
+            btn.appendChild(key);
             btn.addEventListener('click', () => sendCommand(button));
             grid.appendChild(btn);
           }
@@ -399,10 +455,49 @@ namespace EDSC.Desktop.Services
     }
 
     reloadBtn.addEventListener('click', loadConfig);
+    fullscreenBtn.addEventListener('click', async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+          fullscreenBtn.textContent = 'Exit Fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fullscreenBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) {
+        statusEl.textContent = 'Fullscreen not available';
+      }
+    });
     loadConfig();
   </script>
 </body>
 </html>";
+        }
+
+        private static async Task HandleIconRequest(HttpContext context, string? remainingPath)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            var fileName = Path.GetFileName(remainingPath ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Icons", fileName);
+            if (!File.Exists(iconPath))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            context.Response.ContentType = "image/svg+xml";
+            var svg = await File.ReadAllTextAsync(iconPath);
+            await context.Response.WriteAsync(svg);
         }
 
         private async Task HandleCommandRequest(HttpContext context)

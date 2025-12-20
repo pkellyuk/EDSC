@@ -9,152 +9,211 @@
       "key": "U",
       "icon": "build",
       "color": "#6B7280",
+      "label": "Hardpoints",
       "category": "Combat",
-      "label": "Hardpoints"
+      "iconSvg": "hardpoints.svg"
     },
     {
       "id": "landinggear",
       "key": "L",
       "icon": "flight_land",
       "color": "#4B5563",
+      "label": "Landing Gear",
       "category": "Ship Control",
-      "label": "Landing Gear"
+      "iconSvg": "landinggear.svg"
     },
     {
       "id": "cargoscoop",
       "key": "HOME",
       "icon": "inbox",
       "color": "#92400E",
+      "label": "Cargo Scoop",
       "category": "Ship Control",
-      "label": "Cargo Scoop"
+      "iconSvg": "cargoscoop.svg"
     },
     {
       "id": "silentrunning",
       "key": "DELETE",
       "icon": "visibility_off",
       "color": "#7C3AED",
+      "label": "Silent Running",
       "category": "Combat",
-      "label": "Silent Running"
+      "iconSvg": "silentrunning.svg"
     },
     {
       "id": "fsd",
       "key": "J",
       "icon": "travel_explore",
       "color": "#2563EB",
+      "label": "FSD Jump",
       "category": "Navigation",
-      "label": "FSD Jump"
+      "iconSvg": "fsd.svg"
     },
     {
       "id": "orbitlines",
       "key": "OEM_PLUS",
       "icon": "timeline",
       "color": "#0EA5E9",
+      "label": "Orbit Lines",
       "category": "Navigation",
-      "label": "Orbit Lines"
+      "iconSvg": "orbitlines.svg"
     },
     {
       "id": "targetahead",
       "key": "T",
       "icon": "gps_fixed",
       "color": "#10B981",
+      "label": "Target Ahead",
       "category": "Targeting",
-      "label": "Target Ahead"
+      "iconSvg": "targetahead.svg"
     },
     {
       "id": "nexttarget",
       "key": "G",
       "icon": "my_location",
       "color": "#059669",
+      "label": "Next Target",
       "category": "Targeting",
-      "label": "Next Target"
+      "iconSvg": "nexttarget.svg"
     },
     {
       "id": "highestthreat",
       "key": "H",
       "icon": "priority_high",
       "color": "#DC2626",
+      "label": "Highest Threat",
       "category": "Targeting",
-      "label": "Highest Threat"
+      "iconSvg": "highestthreat.svg"
     },
     {
       "id": "nextsubsystem",
       "key": "Y",
       "icon": "swap_horiz",
       "color": "#F59E0B",
+      "label": "Next Subsystem",
       "category": "Combat",
-      "label": "Next Subsystem"
+      "iconSvg": "nextsubsystem.svg"
     },
     {
       "id": "nextfiregroup",
       "key": "N",
       "icon": "layers",
       "color": "#F97316",
+      "label": "Next Fire Group",
       "category": "Combat",
-      "label": "Next Fire Group"
+      "iconSvg": "nextfiregroup.svg"
     },
     {
       "id": "flightassist",
       "key": "Z",
       "icon": "alt_route",
       "color": "#14B8A6",
+      "label": "Flight Assist",
       "category": "Ship Control",
-      "label": "Flight Assist"
+      "iconSvg": "flightassist.svg"
     },
     {
       "id": "setzero",
       "key": "X",
       "icon": "exposure_zero",
       "color": "#0F766E",
+      "label": "Speed 0%",
       "category": "Ship Control",
-      "label": "Speed 0%"
+      "iconSvg": "speed0.svg"
     },
     {
       "id": "leftpanel",
       "key": "1",
       "icon": "filter_1",
       "color": "#1D4ED8",
+      "label": "Left Panel",
       "category": "Panels",
-      "label": "Left Panel"
+      "iconSvg": "leftpanel.svg"
     },
     {
       "id": "commspanel",
       "key": "2",
       "icon": "filter_2",
       "color": "#1E40AF",
+      "label": "Comms Panel",
       "category": "Panels",
-      "label": "Comms Panel"
+      "iconSvg": "commspanel.svg"
     },
     {
       "id": "radarpanel",
       "key": "3",
       "icon": "filter_3",
       "color": "#1E3A8A",
+      "label": "Radar Panel",
       "category": "Panels",
-      "label": "Radar Panel"
+      "iconSvg": "radarpanel.svg"
     },
     {
       "id": "rightpanel",
       "key": "4",
       "icon": "filter_4",
       "color": "#1E3A8A",
+      "label": "Right Panel",
       "category": "Panels",
-      "label": "Right Panel"
+      "iconSvg": "rightpanel.svg"
     },
     {
       "id": "quickcomms",
       "key": "ENTER",
       "icon": "sms",
       "color": "#374151",
+      "label": "Quick Comms",
       "category": "Panels",
-      "label": "Quick Comms"
+      "iconSvg": "quickcomms.svg"
     },
     {
       "id": "hudmode",
       "key": "M",
       "icon": "visibility",
       "color": "#6D28D9",
+      "label": "HUD Mode",
       "category": "Display",
-      "label": "HUD Mode"
+      "iconSvg": "hudmode.svg"
+    },
+    {
+      "key": "NUMPAD5",
+      "label": "Speed 50%",
+      "size": 80,
+      "color": "#0F766E",
+      "id": "setfifty",
+      "icon": "speed_50",
+      "iconSvg": "speed50.svg",
+      "category": "Ship Control"
+    },
+    {
+      "key": "NUMPAD0",
+      "label": "Speed 100%",
+      "size": 80,
+      "color": "#0F766E",
+      "id": "sethundred",
+      "icon": "speed_100",
+      "iconSvg": "speed100.svg",
+      "category": "Ship Control"
+    },
+    {
+      "key": "C",
+      "label": "Chaff",
+      "size": 80,
+      "color": "#DC2626",
+      "id": "chaff",
+      "icon": "burst",
+      "iconSvg": "chaff.svg",
+      "category": "Combat"
+    },
+    {
+      "key": "B",
+      "label": "Shield Booster",
+      "size": 80,
+      "color": "#2563EB",
+      "id": "shieldbooster",
+      "icon": "shield",
+      "iconSvg": "shieldbooster.svg",
+      "category": "Combat"
     }
   ]
 }

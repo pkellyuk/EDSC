@@ -16,6 +16,9 @@ namespace EDSC.Models
         [JsonPropertyName("icon")]
         public string Icon { get; set; }
 
+        [JsonPropertyName("iconSvg")]
+        public string IconSvg { get; set; }
+
         [JsonPropertyName("color")]
         public string Color { get; set; }
 
@@ -33,6 +36,7 @@ namespace EDSC.Models
             Id = string.Empty;
             Key = string.Empty;
             Icon = string.Empty;
+            IconSvg = string.Empty;
             Color = "#4CAF50"; // Default green
             Label = string.Empty;
             Category = "General";
