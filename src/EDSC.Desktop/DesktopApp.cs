@@ -56,8 +56,31 @@ namespace EDSC.Desktop
 
                     var connectionViewModel = new ConnectionViewModel();
 
+                    // Initialize face tracking service
+                    FaceTrackingService? faceTrackingService = null;
+                    OpentrackUdpSender? opentrackSender = null;
+                    try
+                    {
+                        faceTrackingService = new FaceTrackingService();
+                        var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
+                        await faceTrackingService.InitializeAsync(modelsPath);
+                        Debug.WriteLine("[DesktopApp] Face tracking service initialized");
+
+                        // Initialize Opentrack UDP sender
+                        opentrackSender = new OpentrackUdpSender();
+                        opentrackSender.Connect("127.0.0.1", 4242);
+                        Debug.WriteLine("[DesktopApp] Opentrack UDP sender initialized");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[DesktopApp] Failed to initialize face tracking: {ex.Message}");
+                        Debug.WriteLine("[DesktopApp] Continuing without face tracking");
+                        faceTrackingService = null;
+                        opentrackSender = null;
+                    }
+
                     // Initialize HTTP command server
-                    _commandServer = new HttpCommandServer(_keyboardService, configService);
+                    _commandServer = new HttpCommandServer(_keyboardService, configService, faceTrackingService, opentrackSender);
                     Debug.WriteLine("[DesktopApp] Command server initialized");
 
                     // Wire up video frame handler

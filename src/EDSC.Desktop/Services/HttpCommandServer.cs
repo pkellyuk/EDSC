@@ -34,6 +34,10 @@ namespace EDSC.Desktop.Services
         private int _frameCount = 0;
         private double _currentFps = 0;
 
+        // Face tracking
+        private readonly IFaceTrackingService? _faceTrackingService;
+        private readonly OpentrackUdpSender? _opentrackSender;
+
         public bool IsRunning { get; private set; }
 
         /// <summary>
@@ -41,7 +45,16 @@ namespace EDSC.Desktop.Services
         /// </summary>
         public event EventHandler<byte[]>? FrameReceived;
 
-        public HttpCommandServer(IKeyboardService keyboardService, IConfigurationService configService)
+        /// <summary>
+        /// Event fired when head pose is detected
+        /// </summary>
+        public event EventHandler<HeadPose>? PoseDetected;
+
+        public HttpCommandServer(
+            IKeyboardService keyboardService,
+            IConfigurationService configService,
+            IFaceTrackingService? faceTrackingService = null,
+            OpentrackUdpSender? opentrackSender = null)
         {
             Debug.WriteLine("[HttpCommandServer] Entry: Constructor");
 
@@ -57,7 +70,11 @@ namespace EDSC.Desktop.Services
 
             _keyboardService = keyboardService;
             _configService = configService;
+            _faceTrackingService = faceTrackingService;
+            _opentrackSender = opentrackSender;
 
+            Debug.WriteLine($"[HttpCommandServer] Face tracking enabled: {_faceTrackingService != null}");
+            Debug.WriteLine($"[HttpCommandServer] Opentrack enabled: {_opentrackSender != null}");
             Debug.WriteLine("[HttpCommandServer] Exit: Constructor");
         }
 
@@ -1373,6 +1390,33 @@ namespace EDSC.Desktop.Services
 
                         // Fire event for UI update
                         FrameReceived?.Invoke(this, frameData);
+
+                        // Process frame with face tracking service (async, don't wait)
+                        if (_faceTrackingService != null && _faceTrackingService.IsInitialized)
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
+                                    if (pose != null)
+                                    {
+                                        // Fire event for UI update
+                                        PoseDetected?.Invoke(this, pose);
+
+                                        // Send to Opentrack
+                                        if (_opentrackSender != null && _opentrackSender.IsConnected)
+                                        {
+                                            await _opentrackSender.SendPoseAsync(pose);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[HttpCommandServer] Error processing frame: {ex.Message}");
+                                }
+                            });
+                        }
 
                         // Send acknowledgment
                         var ackMessage = Encoding.UTF8.GetBytes("OK");
