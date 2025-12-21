@@ -1,4 +1,5 @@
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 using EDSC.Desktop.Services;
 using EDSC.Models;
 using EDSC.Services;
@@ -53,9 +54,44 @@ namespace EDSC.Desktop
                     _keyboardService = new WindowsKeyboardService();
                     Debug.WriteLine("[DesktopApp] Keyboard service initialized");
 
+                    var connectionViewModel = new ConnectionViewModel();
+
                     // Initialize HTTP command server
                     _commandServer = new HttpCommandServer(_keyboardService, configService);
                     Debug.WriteLine("[DesktopApp] Command server initialized");
+
+                    // Wire up video frame handler
+                    if (_commandServer is HttpCommandServer httpServer)
+                    {
+                        httpServer.FrameReceived += (sender, frameData) =>
+                        {
+                            try
+                            {
+                                // Convert byte array to Bitmap on UI thread
+                                Dispatcher.UIThread.InvokeAsync(() =>
+                                {
+                                    try
+                                    {
+                                        using (var ms = new MemoryStream(frameData))
+                                        {
+                                            var bitmap = new Bitmap(ms);
+                                            var fps = httpServer.GetCurrentFps();
+                                            connectionViewModel.UpdateVideoFrame(bitmap, fps);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Debug.WriteLine($"[DesktopApp] Error updating video frame: {ex.Message}");
+                                    }
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[DesktopApp] Error in FrameReceived handler: {ex.Message}");
+                            }
+                        };
+                        Debug.WriteLine("[DesktopApp] Video frame handler wired up");
+                    }
 
                     // Start HTTP server
                     if (_serverConfig.AutoStart)
@@ -69,7 +105,6 @@ namespace EDSC.Desktop
                         Debug.WriteLine("[DesktopApp] HTTP server auto-start disabled");
                     }
 
-                    var connectionViewModel = new ConnectionViewModel();
                     var shellViewModel = new DesktopShellViewModel(connectionViewModel, configService, _serverConfig.Port);
                     desktop.MainWindow = new MainWindow
                     {

@@ -19,6 +19,12 @@ namespace EDSC.ViewModels
         private ObservableCollection<string> _localIpAddresses;
         private string _selectedLocalIpAddress;
 
+        // Video tracking properties
+        private bool _showVideoPreview;
+        private Bitmap? _videoFrameImage;
+        private string _videoStatusText;
+        private string _videoFps;
+
         public string StatusMessage
         {
             get
@@ -146,6 +152,86 @@ namespace EDSC.ViewModels
 
         public event EventHandler<string>? LocalIpAddressChanged;
 
+        public bool ShowVideoPreview
+        {
+            get
+            {
+                return _showVideoPreview;
+            }
+            set
+            {
+                if (_showVideoPreview == value)
+                {
+                    return;
+                }
+
+                _showVideoPreview = value;
+                OnPropertyChanged(nameof(ShowVideoPreview));
+            }
+        }
+
+        public Bitmap? VideoFrameImage
+        {
+            get
+            {
+                return _videoFrameImage;
+            }
+            set
+            {
+                if (_videoFrameImage == value)
+                {
+                    return;
+                }
+
+                _videoFrameImage = value;
+                OnPropertyChanged(nameof(VideoFrameImage));
+            }
+        }
+
+        public string VideoStatusText
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_videoStatusText))
+                {
+                    return "Waiting for video stream...";
+                }
+                return _videoStatusText;
+            }
+            set
+            {
+                if (_videoStatusText == value)
+                {
+                    return;
+                }
+
+                _videoStatusText = value;
+                OnPropertyChanged(nameof(VideoStatusText));
+            }
+        }
+
+        public string VideoFps
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_videoFps))
+                {
+                    return "0.0";
+                }
+                return _videoFps;
+            }
+            set
+            {
+                if (_videoFps == value)
+                {
+                    return;
+                }
+
+                _videoFps = value;
+                OnPropertyChanged(nameof(VideoFps));
+            }
+        }
+
         public ConnectionViewModel()
         {
             Debug.WriteLine("[ConnectionVM] Entry: Constructor");
@@ -156,6 +242,12 @@ namespace EDSC.ViewModels
             _qrCodeUrl = string.Empty;
             _localIpAddresses = new ObservableCollection<string>();
             _selectedLocalIpAddress = string.Empty;
+
+            // Initialize video tracking properties
+            _showVideoPreview = false;
+            _videoFrameImage = null;
+            _videoStatusText = "Waiting for video stream...";
+            _videoFps = "0.0";
 
             Debug.WriteLine("[ConnectionVM] Exit: Constructor");
         }
@@ -195,6 +287,26 @@ namespace EDSC.ViewModels
             {
                 SelectedLocalIpAddress = LocalIpAddresses[0];
             }
+        }
+
+        public void UpdateVideoFrame(Bitmap? frameImage, double fps)
+        {
+            VideoFrameImage = frameImage;
+            VideoFps = fps.ToString("F1");
+
+            if (frameImage != null)
+            {
+                ShowVideoPreview = true;
+                VideoStatusText = "Receiving video stream";
+            }
+        }
+
+        public void HideVideoPreview()
+        {
+            ShowVideoPreview = false;
+            VideoFrameImage = null;
+            VideoFps = "0.0";
+            VideoStatusText = "Waiting for video stream...";
         }
     }
 

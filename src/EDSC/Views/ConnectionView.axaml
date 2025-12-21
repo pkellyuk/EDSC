@@ -73,6 +73,37 @@
                 </StackPanel>
             </Border>
 
+            <!-- Face Tracking Preview -->
+            <Border Background="#111827"
+                   Padding="10"
+                   CornerRadius="5"
+                   Margin="0,10,0,0"
+                   IsVisible="{Binding ShowVideoPreview}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Face Tracking Preview"
+                              FontWeight="Bold"
+                              FontSize="14"
+                              Foreground="#F9FAFB"/>
+                    <TextBlock Text="{Binding VideoStatusText}"
+                              FontSize="12"
+                              Foreground="#D1D5DB"/>
+                    <Image Source="{Binding VideoFrameImage}"
+                           Width="480"
+                           Height="360"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                        <TextBlock Text="FPS:"
+                                  FontSize="12"
+                                  Foreground="#D1D5DB"/>
+                        <TextBlock Text="{Binding VideoFps}"
+                                  FontSize="12"
+                                  FontWeight="Bold"
+                                  Foreground="#10B981"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- Help Text -->
             <Border Background="#1E293B"
                    Padding="10"
@@ -93,6 +124,8 @@
                         <Run Text="3. Scan the QR code with your phone"/>
                         <LineBreak/>
                         <Run Text="4. Use the browser UI to press buttons"/>
+                        <LineBreak/>
+                        <Run Text="5. Click 'Face Tracking' to start video streaming"/>
                     </TextBlock>
                 </StackPanel>
             </Border>

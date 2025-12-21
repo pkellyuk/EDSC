@@ -8,6 +8,8 @@ using Microsoft.Extensions.Hosting;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,7 +27,19 @@ namespace EDSC.Desktop.Services
         private readonly object _configLock = new object();
         private AppConfig? _currentConfig;
 
+        // Video streaming state
+        private byte[]? _latestFrame;
+        private readonly object _frameLock = new object();
+        private DateTime _lastFrameTime = DateTime.MinValue;
+        private int _frameCount = 0;
+        private double _currentFps = 0;
+
         public bool IsRunning { get; private set; }
+
+        /// <summary>
+        /// Event fired when a new video frame is received
+        /// </summary>
+        public event EventHandler<byte[]>? FrameReceived;
 
         public HttpCommandServer(IKeyboardService keyboardService, IConfigurationService configService)
         {
@@ -124,6 +138,9 @@ namespace EDSC.Desktop.Services
 
                         webBuilder.Configure(app =>
                         {
+                            // Enable WebSocket support
+                            app.UseWebSockets();
+
                             app.Use(async (context, next) =>
                             {
                                 if (!context.Request.IsHttps && context.Request.Host.Host != "localhost" && context.Request.Host.Host != "127.0.0.1")
@@ -166,6 +183,10 @@ namespace EDSC.Desktop.Services
                                 else if (context.Request.Path == "/command" && context.Request.Method == "POST")
                                 {
                                     await HandleCommandRequest(context);
+                                }
+                                else if (context.Request.Path == "/video" && context.WebSockets.IsWebSocketRequest)
+                                {
+                                    await HandleVideoWebSocket(context);
                                 }
                                 else
                                 {
@@ -426,6 +447,31 @@ namespace EDSC.Desktop.Services
       background: #1E3A8A;
       color: #DBEAFE;
     }
+    .tracking-panel {
+      background: var(--card);
+      border: 1px solid #2a313d;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    .tracking-status {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    #videoCanvas {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      background: #000;
+    }
+    .tracking-btn.active {
+      background: #DC2626;
+      border-color: #EF4444;
+    }
   </style>
 </head>
 <body>
@@ -439,6 +485,15 @@ namespace EDSC.Desktop.Services
       <button id=""reload"">Reload config</button>
       <button id=""fullscreen"">Fullscreen</button>
       <button id=""voiceBtn"" class=""voice-btn"">🎤 Voice</button>
+      <button id=""trackingBtn"" class=""tracking-btn"">📹 Face Tracking</button>
+    </div>
+    <div id=""trackingPanel"" class=""tracking-panel"" style=""display:none;"">
+      <div class=""tracking-status"">
+        <span id=""trackingStatusText"">Ready</span>
+        <span id=""trackingFps"">0 FPS</span>
+      </div>
+      <canvas id=""videoCanvas"" width=""480"" height=""360""></canvas>
+      <video id=""videoPreview"" autoplay playsinline style=""display:none;""></video>
     </div>
     <div id=""voiceFeedback"" class=""voice-feedback"" style=""display:none;"">
       <div class=""voice-status"">
@@ -977,7 +1032,180 @@ namespace EDSC.Desktop.Services
       if (voiceControl.isListening) {
         stopVoiceRecognition();
       }
+      if (tracking.isActive) {
+        stopTracking();
+      }
     });
+
+    // Face Tracking functionality
+    const tracking = {
+      isActive: false,
+      stream: null,
+      ws: null,
+      video: null,
+      canvas: null,
+      ctx: null,
+      frameInterval: null,
+      fps: 0,
+      frameCount: 0,
+      lastFpsUpdate: Date.now()
+    };
+
+    function initTracking() {
+      tracking.video = document.getElementById('videoPreview');
+      tracking.canvas = document.getElementById('videoCanvas');
+      tracking.ctx = tracking.canvas.getContext('2d');
+    }
+
+    async function startTracking() {
+      console.log('[Tracking] Starting face tracking...');
+
+      try {
+        // Get camera access
+        const constraints = {
+          video: {
+            width: { ideal: 480 },
+            height: { ideal: 360 },
+            frameRate: { ideal: 30 },
+            facingMode: 'user'
+          }
+        };
+
+        tracking.stream = await navigator.mediaDevices.getUserMedia(constraints);
+        tracking.video.srcObject = tracking.stream;
+
+        await tracking.video.play();
+
+        console.log('[Tracking] Camera started');
+
+        // Connect WebSocket
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/video`;
+
+        tracking.ws = new WebSocket(wsUrl);
+        tracking.ws.binaryType = 'arraybuffer';
+
+        tracking.ws.onopen = () => {
+          console.log('[Tracking] WebSocket connected');
+          document.getElementById('trackingStatusText').textContent = 'Streaming';
+
+          // Start capturing and sending frames
+          tracking.frameInterval = setInterval(captureAndSendFrame, 33); // ~30 FPS
+        };
+
+        tracking.ws.onerror = (error) => {
+          console.error('[Tracking] WebSocket error:', error);
+          document.getElementById('trackingStatusText').textContent = 'Connection error';
+        };
+
+        tracking.ws.onclose = () => {
+          console.log('[Tracking] WebSocket closed');
+          stopTracking();
+        };
+
+        tracking.isActive = true;
+        document.getElementById('trackingPanel').style.display = 'block';
+        document.getElementById('trackingBtn').classList.add('active');
+        document.getElementById('trackingBtn').textContent = '⏹ Stop Tracking';
+
+      } catch (error) {
+        console.error('[Tracking] Error starting:', error);
+        document.getElementById('trackingStatusText').textContent = 'Error: ' + error.message;
+        stopTracking();
+      }
+    }
+
+    function captureAndSendFrame() {
+      if (!tracking.video || !tracking.canvas || !tracking.ctx || !tracking.ws) {
+        return;
+      }
+
+      if (tracking.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      // Draw video to canvas
+      tracking.ctx.drawImage(tracking.video, 0, 0, tracking.canvas.width, tracking.canvas.height);
+
+      // Get image data and convert to grayscale
+      const imageData = tracking.ctx.getImageData(0, 0, tracking.canvas.width, tracking.canvas.height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        data[i] = data[i + 1] = data[i + 2] = gray;
+      }
+
+      tracking.ctx.putImageData(imageData, 0, 0);
+
+      // Convert to JPEG and send via WebSocket
+      tracking.canvas.toBlob((blob) => {
+        if (blob && tracking.ws && tracking.ws.readyState === WebSocket.OPEN) {
+          blob.arrayBuffer().then(buffer => {
+            tracking.ws.send(buffer);
+
+            // Update FPS counter
+            tracking.frameCount++;
+            const now = Date.now();
+            const elapsed = (now - tracking.lastFpsUpdate) / 1000;
+            if (elapsed >= 1.0) {
+              tracking.fps = tracking.frameCount / elapsed;
+              document.getElementById('trackingFps').textContent = tracking.fps.toFixed(1) + ' FPS';
+              tracking.frameCount = 0;
+              tracking.lastFpsUpdate = now;
+            }
+          });
+        }
+      }, 'image/jpeg', 0.6);
+    }
+
+    function stopTracking() {
+      console.log('[Tracking] Stopping...');
+
+      tracking.isActive = false;
+
+      if (tracking.frameInterval) {
+        clearInterval(tracking.frameInterval);
+        tracking.frameInterval = null;
+      }
+
+      if (tracking.ws) {
+        tracking.ws.close();
+        tracking.ws = null;
+      }
+
+      if (tracking.stream) {
+        tracking.stream.getTracks().forEach(track => track.stop());
+        tracking.stream = null;
+      }
+
+      if (tracking.video) {
+        tracking.video.srcObject = null;
+      }
+
+      document.getElementById('trackingPanel').style.display = 'none';
+      document.getElementById('trackingBtn').classList.remove('active');
+      document.getElementById('trackingBtn').textContent = '📹 Face Tracking';
+      document.getElementById('trackingStatusText').textContent = 'Ready';
+      document.getElementById('trackingFps').textContent = '0 FPS';
+    }
+
+    function toggleTracking() {
+      if (tracking.isActive) {
+        stopTracking();
+      } else {
+        startTracking();
+      }
+    }
+
+    // Initialize tracking
+    initTracking();
+
+    // Tracking button handler
+    const trackingBtn = document.getElementById('trackingBtn');
+    if (trackingBtn) {
+      trackingBtn.addEventListener('click', toggleTracking);
+    }
 
     loadConfig();
   </script>
@@ -1087,6 +1315,113 @@ namespace EDSC.Desktop.Services
             }
 
             Debug.WriteLine("[HttpCommandServer] Exit: SendResponse");
+        }
+
+        private async Task HandleVideoWebSocket(HttpContext context)
+        {
+            Debug.WriteLine("[HttpCommandServer] Entry: HandleVideoWebSocket");
+
+            if (context == null)
+            {
+                Debug.WriteLine("[HttpCommandServer] Context is null");
+                return;
+            }
+
+            WebSocket? webSocket = null;
+
+            try
+            {
+                webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                Debug.WriteLine("[HttpCommandServer] WebSocket connection established");
+
+                var buffer = new byte[1024 * 1024]; // 1MB buffer for frame data
+                var frameStartTime = DateTime.UtcNow;
+
+                while (webSocket.State == WebSocketState.Open)
+                {
+                    var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        Debug.WriteLine("[HttpCommandServer] WebSocket close requested");
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                        break;
+                    }
+
+                    if (result.MessageType == WebSocketMessageType.Binary)
+                    {
+                        Debug.WriteLine($"[HttpCommandServer] Received frame: {result.Count} bytes");
+
+                        // Store the frame
+                        var frameData = new byte[result.Count];
+                        Array.Copy(buffer, 0, frameData, 0, result.Count);
+
+                        lock (_frameLock)
+                        {
+                            _latestFrame = frameData;
+                            _frameCount++;
+
+                            // Calculate FPS
+                            var elapsed = (DateTime.UtcNow - frameStartTime).TotalSeconds;
+                            if (elapsed > 0)
+                            {
+                                _currentFps = _frameCount / elapsed;
+                            }
+
+                            _lastFrameTime = DateTime.UtcNow;
+                        }
+
+                        // Fire event for UI update
+                        FrameReceived?.Invoke(this, frameData);
+
+                        // Send acknowledgment
+                        var ackMessage = Encoding.UTF8.GetBytes("OK");
+                        await webSocket.SendAsync(new ArraySegment<byte>(ackMessage), WebSocketMessageType.Text, true, CancellationToken.None);
+                    }
+                }
+
+                Debug.WriteLine("[HttpCommandServer] WebSocket connection closed");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HttpCommandServer] WebSocket error: {ex.Message}");
+
+                if (webSocket != null && webSocket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await webSocket.CloseAsync(WebSocketCloseStatus.InternalServerError, ex.Message, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // Ignore close errors
+                    }
+                }
+            }
+
+            Debug.WriteLine("[HttpCommandServer] Exit: HandleVideoWebSocket");
+        }
+
+        /// <summary>
+        /// Get the latest received frame
+        /// </summary>
+        public byte[]? GetLatestFrame()
+        {
+            lock (_frameLock)
+            {
+                return _latestFrame;
+            }
+        }
+
+        /// <summary>
+        /// Get current FPS
+        /// </summary>
+        public double GetCurrentFps()
+        {
+            lock (_frameLock)
+            {
+                return _currentFps;
+            }
         }
 
         public async Task StopAsync()
