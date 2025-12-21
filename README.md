@@ -19,10 +19,11 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 ## Features
 
 - QR code web UI (no mobile app required)
-- HTTP command server on port 9000
+- HTTP (port 9000) and HTTPS (port 9001) command server
+- Voice control with continuous listening
 - Keyboard simulation for Elite Dangerous
 - JSON configuration for buttons (categories + SVG icons)
-- IP selector to choose the correct local address
+- IP selector with common addresses (192.168.x.x) prioritized
 
 ## Quick Start
 
@@ -116,6 +117,41 @@ http://<pc-ip>:9000/web
 
 The web UI groups buttons by category and shows SVG icons above the labels. It also includes a Fullscreen toggle in the toolbar.
 
+## Voice Commands
+
+The web UI supports voice control for hands-free operation. Click the "Voice" button to enable continuous listening.
+
+**How it works:**
+- The browser listens continuously for speech
+- When you say a button label (e.g., "left panel", "landing gear", "hardpoints"), it triggers that command
+- Commands are matched using fuzzy matching, so slight variations are tolerated
+- A 2-second cooldown prevents accidental double-firing
+
+**Example voice commands:**
+- "Left panel" - opens the left ship panel
+- "Right panel" - opens the right ship panel
+- "Comms panel" - opens the comms panel
+- "Landing gear" - toggles landing gear
+- "Cargo scoop" - toggles cargo scoop
+- "Hardpoints" - deploys/retracts hardpoints
+
+Voice commands use your browser's built-in speech recognition (Web Speech API). This requires an internet connection as most browsers use cloud-based speech recognition.
+
+## HTTPS and Certificate Warning
+
+The web UI is available on both HTTP (port 9000) and HTTPS (port 9001). HTTPS is required for voice commands on most mobile browsers, as the Web Speech API requires a secure context.
+
+**Why you'll see a certificate warning:**
+
+The app uses a self-signed SSL certificate generated at runtime. Your browser will show a security warning because the certificate is not signed by a trusted certificate authority. This is expected and safe for local network use.
+
+**To proceed past the warning:**
+- **Chrome/Edge**: Click "Advanced" then "Proceed to [IP address] (unsafe)"
+- **Safari**: Click "Show Details" then "visit this website"
+- **Firefox**: Click "Advanced" then "Accept the Risk and Continue"
+
+The HTTPS connection encrypts traffic between your phone and PC, even though the certificate is self-signed.
+
 ## Troubleshooting
 
 **Web UI does not load**
@@ -126,6 +162,12 @@ The web UI groups buttons by category and shows SVG icons above the labels. It a
 
 **Buttons not triggering reliably**
 - Some games need longer key presses; the desktop app uses a short long-press (down → delay → up) by default.
+
+**Voice commands not working**
+- Use HTTPS (port 9001) - voice requires a secure context
+- Accept the certificate warning in your browser
+- Ensure microphone permission is granted
+- Check that your browser supports Web Speech API (Chrome, Edge, Safari)
 
 ## Installer (EXE)
 
