@@ -209,52 +209,47 @@ namespace EDSC.Desktop.Services
                             return null;
                         }
 
-                        // ONNX face detection models typically output normalized coordinates [0,1]
-                        // in format [x_center, y_center, width, height] or [x1, y1, x2, y2]
-                        // We need to determine the format and scale properly to original image dimensions
+                        // The face detection model processes a 120x160 image but returns coordinates
+                        // relative to this resized image. We need to scale them back to original image space.
+                        // Most face detection models output normalized coordinates [0,1] relative to the model input.
 
-                        float scaleX = (float)image.Width;
-                        float scaleY = (float)image.Height;
+                        float scaleX = (float)image.Width / FaceDetectionWidth;
+                        float scaleY = (float)image.Height / FaceDetectionHeight;
 
-                        // Determine if coordinates are already normalized (0-1) or need normalization (-1 to 1)
-                        bool isNormalizedRange = output.All(v => v >= 0 && v <= 1);
-
-                        // Check if format is corner coordinates [x1, y1, x2, y2] vs center format [cx, cy, w, h]
+                        // Determine if format is corner coordinates [x1, y1, x2, y2] vs center format [cx, cy, w, h]
                         bool isCornerFormat = output.Length >= 4 &&
                                            (output[2] > output[0] && output[3] > output[1]); // x2 > x1 and y2 > y1
 
-                        Console.WriteLine($"[FaceTrackingService] Model output format: normalized={isNormalizedRange}, cornerFormat={isCornerFormat}");
-                        Console.WriteLine($"[FaceTrackingService] Sample output: [{string.Join(", ", output.Take(4).Select(v => v.ToString("F3")))}]");
 
                         if (isCornerFormat)
                         {
-                            // Corner format: [x1, y1, x2, y2]
-                            float x1 = isNormalizedRange ? output[0] * scaleX : (output[0] + 1f) * 0.5f * scaleX;
-                            float y1 = isNormalizedRange ? output[1] * scaleY : (output[1] + 1f) * 0.5f * scaleY;
-                            float x2 = isNormalizedRange ? output[2] * scaleX : (output[2] + 1f) * 0.5f * scaleX;
-                            float y2 = isNormalizedRange ? output[3] * scaleY : (output[3] + 1f) * 0.5f * scaleY;
+                            // Corner format: [x1, y1, x2, y2] - coordinates are normalized [0,1] of model input
+                            float x1 = output[0] * image.Width;
+                            float y1 = output[1] * image.Height;
+                            float x2 = output[2] * image.Width;
+                            float y2 = output[3] * image.Height;
 
                             return (
-                                Math.Max(0, Math.Min(x1, scaleX)),
-                                Math.Max(0, Math.Min(y1, scaleY)),
-                                Math.Max(0, Math.Min(x2 - x1, scaleX)),
-                                Math.Max(0, Math.Min(y2 - y1, scaleY))
+                                Math.Max(0, Math.Min(x1, image.Width)),
+                                Math.Max(0, Math.Min(y1, image.Height)),
+                                Math.Max(0, Math.Min(x2 - x1, image.Width)),
+                                Math.Max(0, Math.Min(y2 - y1, image.Height))
                             );
                         }
                         else
                         {
-                            // Center format: [centerX, centerY, width, height]
-                            float centerX = isNormalizedRange ? output[0] * scaleX : (output[0] + 1f) * 0.5f * scaleX;
-                            float centerY = isNormalizedRange ? output[1] * scaleY : (output[1] + 1f) * 0.5f * scaleY;
-                            float width = isNormalizedRange ? output[2] * scaleX : (output[2] + 1f) * 0.5f * scaleX;
-                            float height = isNormalizedRange ? output[3] * scaleY : (output[3] + 1f) * 0.5f * scaleY;
+                            // Center format: [centerX, centerY, width, height] - coordinates are normalized [0,1] of model input
+                            float centerX = output[0] * image.Width;
+                            float centerY = output[1] * image.Height;
+                            float width = output[2] * image.Width;
+                            float height = output[3] * image.Height;
 
                             // Convert from center format to top-left format
                             return (
-                                Math.Max(0, Math.Min(centerX - width / 2, scaleX)),
-                                Math.Max(0, Math.Min(centerY - height / 2, scaleY)),
-                                Math.Max(0, Math.Min(width, scaleX)),
-                                Math.Max(0, Math.Min(height, scaleY))
+                                Math.Max(0, Math.Min(centerX - width / 2, image.Width)),
+                                Math.Max(0, Math.Min(centerY - height / 2, image.Height)),
+                                Math.Max(0, Math.Min(width, image.Width)),
+                                Math.Max(0, Math.Min(height, image.Height))
                             );
                         }
                     }
@@ -330,33 +325,23 @@ namespace EDSC.Desktop.Services
 
                         var landmarks = new Vector2[66];
 
-                        // Convert normalized coordinates back to original image space
+                        // The landmark model processes a 114x114 cropped face region and returns
+                        // normalized coordinates [0,1] relative to this cropped region
                         float scaleX = cropWidth;
                         float scaleY = cropHeight;
 
-                        // Determine if landmarks are in normalized range [0,1] or need scaling
-                        bool isNormalizedRange = output.All(v => v >= 0 && v <= 1);
-
-                        Console.WriteLine($"[FaceTrackingService] Landmark model output format: normalized={isNormalizedRange}");
-                        Console.WriteLine($"[FaceTrackingService] Crop region: x={cropX}, y={cropY}, w={cropWidth}, h={cropHeight}");
-
                         for (int i = 0; i < 66; i++)
                         {
-                            float normX = output[i * 2];
-                            float normY = output[i * 2 + 1];
+                            // Landmark coordinates are typically normalized [0,1] relative to the model input (cropped region)
+                            float normX = Math.Max(0, Math.Min(1, output[i * 2]));
+                            float normY = Math.Max(0, Math.Min(1, output[i * 2 + 1]));
 
-                            // Clamp values to reasonable range
-                            normX = Math.Max(0, Math.Min(1, normX));
-                            normY = Math.Max(0, Math.Min(1, normY));
-
-                            // Convert to original image coordinates
+                            // Convert from normalized cropped coordinates back to original image coordinates
                             landmarks[i] = new Vector2(
                                 cropX + normX * scaleX,
                                 cropY + normY * scaleY
                             );
                         }
-
-                        Console.WriteLine($"[FaceTrackingService] First few landmarks: [{string.Join(", ", landmarks.Take(3).Select(l => $"({l.X:F1},{l.Y:F1})"))}]");
 
                         return landmarks;
                     }

@@ -401,13 +401,7 @@ namespace EDSC.Desktop
             {
                 using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
                 {
-                    // Log image dimensions and face box info
-                    Debug.WriteLine($"[DesktopApp] Image dimensions: {image.Width}x{image.Height}");
-                    if (pose.FaceBox != null)
-                    {
-                        Debug.WriteLine($"[DesktopApp] Face box: X={pose.FaceBox.X:F1}, Y={pose.FaceBox.Y:F1}, W={pose.FaceBox.Width:F1}, H={pose.FaceBox.Height:F1}");
-                    }
-
+                    
                     image.Mutate(ctx =>
                     {
                         // Draw face bounding box (green rectangle)
@@ -422,8 +416,7 @@ namespace EDSC.Desktop
                             rect.Width = Math.Max(0, Math.Min(rect.Width, image.Width - rect.X));
                             rect.Height = Math.Max(0, Math.Min(rect.Height, image.Height - rect.Y));
 
-                            Debug.WriteLine($"[DesktopApp] Drawing rect: X={rect.X:F1}, Y={rect.Y:F1}, W={rect.Width:F1}, H={rect.Height:F1}");
-                            ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
+                                                        ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
                         }
 
                         // Draw landmarks (small circles)
@@ -439,8 +432,7 @@ namespace EDSC.Desktop
                                 ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(point, 3f));
                                 validLandmarks++;
                             }
-                            Debug.WriteLine($"[DesktopApp] Drew {validLandmarks} landmarks");
-                        }
+                                                    }
                     });
 
                     // Convert to Avalonia Bitmap
