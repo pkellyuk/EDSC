@@ -14,6 +14,12 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.Drawing;
+using Path = System.IO.Path;
 
 namespace EDSC.Desktop
 {
@@ -83,24 +89,44 @@ namespace EDSC.Desktop
                     _commandServer = new HttpCommandServer(_keyboardService, configService, faceTrackingService, opentrackSender);
                     Debug.WriteLine("[DesktopApp] Command server initialized");
 
+                    HeadPose? lastPose = null;
+
                     // Wire up video frame handler
                     if (_commandServer is HttpCommandServer httpServer)
                     {
+                        // Wire up pose detection to capture detection data
+                        httpServer.PoseDetected += (sender, pose) =>
+                        {
+                            lastPose = pose;
+                            Debug.WriteLine($"[DesktopApp] Pose: {pose}");
+                        };
+
                         httpServer.FrameReceived += (sender, frameData) =>
                         {
                             try
                             {
-                                // Convert byte array to Bitmap on UI thread
+                                // Convert byte array to Bitmap on UI thread with overlays
                                 Dispatcher.UIThread.InvokeAsync(() =>
                                 {
                                     try
                                     {
-                                        using (var ms = new MemoryStream(frameData))
+                                        Bitmap bitmap;
+
+                                        // Draw overlays if face was detected
+                                        if (lastPose != null && lastPose.FaceBox != null)
                                         {
-                                            var bitmap = new Bitmap(ms);
-                                            var fps = httpServer.GetCurrentFps();
-                                            connectionViewModel.UpdateVideoFrame(bitmap, fps);
+                                            bitmap = DrawOverlays(frameData, lastPose);
                                         }
+                                        else
+                                        {
+                                            using (var ms = new MemoryStream(frameData))
+                                            {
+                                                bitmap = new Bitmap(ms);
+                                            }
+                                        }
+
+                                        var fps = httpServer.GetCurrentFps();
+                                        connectionViewModel.UpdateVideoFrame(bitmap, fps);
                                     }
                                     catch (Exception ex)
                                     {
@@ -363,6 +389,60 @@ namespace EDSC.Desktop
             catch
             {
                 return "127.0.0.1";
+            }
+        }
+
+        private static Bitmap DrawOverlays(byte[] frameData, HeadPose pose)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: DrawOverlays");
+
+            try
+            {
+                using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
+                {
+                    image.Mutate(ctx =>
+                    {
+                        // Draw face bounding box (green rectangle)
+                        if (pose.FaceBox != null)
+                        {
+                            var faceBox = pose.FaceBox;
+                            var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
+
+                            ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
+                        }
+
+                        // Draw landmarks (small circles)
+                        if (pose.Landmarks != null)
+                        {
+                            foreach (var landmark in pose.Landmarks)
+                            {
+                                var point = new PointF(landmark.X, landmark.Y);
+                                ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(point, 3f));
+                            }
+                        }
+                    });
+
+                    // Convert to Avalonia Bitmap
+                    using (var ms = new MemoryStream())
+                    {
+                        image.SaveAsJpeg(ms);
+                        ms.Position = 0;
+                        return new Bitmap(ms);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error drawing overlays: {ex.Message}");
+                // Return original frame if overlay fails
+                using (var ms = new MemoryStream(frameData))
+                {
+                    return new Bitmap(ms);
+                }
+            }
+            finally
+            {
+                Debug.WriteLine("[DesktopApp] Exit: DrawOverlays");
             }
         }
 

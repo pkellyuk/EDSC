@@ -136,6 +136,25 @@ namespace EDSC.Desktop.Services
 
                     // Step 3: Calculate head pose from landmarks
                     var pose = CalculateHeadPose(landmarks, image.Width, image.Height);
+
+                    if (pose != null)
+                    {
+                        // Add visualization data
+                        pose.FaceBox = new FaceBox
+                        {
+                            X = faceBox.Value.x,
+                            Y = faceBox.Value.y,
+                            Width = faceBox.Value.width,
+                            Height = faceBox.Value.height
+                        };
+
+                        pose.Landmarks = landmarks.Select(lm => new LandmarkPoint
+                        {
+                            X = lm.X,
+                            Y = lm.Y
+                        }).ToArray();
+                    }
+
                     return pose;
                 }
             }
