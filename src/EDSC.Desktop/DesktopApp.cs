@@ -204,12 +204,15 @@ namespace EDSC.Desktop
 
         private static string[] GetLocalIpAddresses()
         {
+            Debug.WriteLine("[DesktopApp] Entry: GetLocalIpAddresses()");
+
             try
             {
                 var host = Dns.GetHostEntry(Dns.GetHostName());
 
                 if (host?.AddressList == null)
                 {
+                    Debug.WriteLine("[DesktopApp] Exit: GetLocalIpAddresses() - host or AddressList is null, returning 127.0.0.1");
                     return new[] { "127.0.0.1" };
                 }
 
@@ -218,19 +221,59 @@ namespace EDSC.Desktop
                     .Select(ip => ip.ToString())
                     .Where(ip => !string.IsNullOrEmpty(ip))
                     .Distinct()
+                    .OrderBy(ip => GetIpPriority(ip))
                     .ToArray();
 
                 if (addresses.Length > 0)
                 {
+                    Debug.WriteLine($"[DesktopApp] Exit: GetLocalIpAddresses() - returning {addresses.Length} addresses: {string.Join(", ", addresses)}");
                     return addresses;
                 }
 
+                Debug.WriteLine("[DesktopApp] Exit: GetLocalIpAddresses() - no addresses found, returning 127.0.0.1");
                 return new[] { "127.0.0.1" };
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[DesktopApp] Exit: GetLocalIpAddresses() - exception: {ex.Message}");
                 return new[] { "127.0.0.1" };
             }
+        }
+
+        private static int GetIpPriority(string ip)
+        {
+            if (string.IsNullOrEmpty(ip))
+            {
+                return 99;
+            }
+
+            // 192.168.x.x - most common home/small office networks
+            if (ip.StartsWith("192.168."))
+            {
+                return 0;
+            }
+
+            // 10.x.x.x - common in larger networks
+            if (ip.StartsWith("10."))
+            {
+                return 1;
+            }
+
+            // 172.16.x.x - 172.31.x.x - private range
+            if (ip.StartsWith("172."))
+            {
+                var parts = ip.Split('.');
+                if (parts.Length >= 2 && int.TryParse(parts[1], out int second))
+                {
+                    if (second >= 16 && second <= 31)
+                    {
+                        return 2;
+                    }
+                }
+            }
+
+            // Other IPs (public, etc.)
+            return 10;
         }
 
         private static string GetLocalIpAddress()

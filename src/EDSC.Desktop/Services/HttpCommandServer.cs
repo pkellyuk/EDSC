@@ -462,8 +462,9 @@ namespace EDSC.Desktop.Services
       recognition: null,
       isListening: false,
       buttons: [],
-      wakeWord: 'ship',
-      lastTranscript: '',
+      lastProcessedButtonId: '',
+      lastProcessedTime: 0,
+      commandCooldownMs: 2000,
       interimResults: true,
       language: 'en-GB'
     };
@@ -640,41 +641,50 @@ namespace EDSC.Desktop.Services
       }
     }
 
-    // Wake Word Detection & Command Extraction
+    // Clear the voice transcript UI after command execution
+    function clearTranscriptUI() {
+      console.log('[Voice] Clearing transcript UI');
+      updateVoiceTranscript('');
+    }
+
+    // Process voice command - continuous listening, immediate execution
     function processVoiceCommand(transcript) {
       if (!transcript) {
         return;
       }
 
-      console.log('Processing transcript:', transcript);
-      voiceControl.lastTranscript = transcript;
+      console.log('[Voice] Processing transcript:', transcript);
 
-      if (!transcript.includes(voiceControl.wakeWord)) {
-        updateVoiceMatch('info', `Waiting for wake word ""${voiceControl.wakeWord}""...`);
-        return;
-      }
-
-      const wakeWordIndex = transcript.indexOf(voiceControl.wakeWord);
-      const commandText = transcript.substring(wakeWordIndex + voiceControl.wakeWord.length).trim();
-
-      if (!commandText) {
-        updateVoiceMatch('info', 'Wake word detected, but no command specified');
-        return;
-      }
-
-      console.log('Extracted command:', commandText);
-
+      const commandText = transcript.trim();
       const matchedButton = findBestMatch(commandText);
 
-      if (matchedButton) {
-        updateVoiceStatus('processing', 'Processing...');
-        updateVoiceButtonState('processing');
-        updateVoiceMatch('success', `Matched: ""${matchedButton.label}"" - Executing...`);
-
-        sendCommand(matchedButton);
-      } else {
-        updateVoiceMatch('error', `No match found for ""${commandText}""`);
+      if (!matchedButton) {
+        // No match - just keep listening
+        return;
       }
+
+      // Deduplication check - skip if same BUTTON was pressed recently
+      // This prevents double-firing even if transcript text varies slightly
+      const now = Date.now();
+      const timeSinceLastCommand = now - voiceControl.lastProcessedTime;
+      if (matchedButton.id === voiceControl.lastProcessedButtonId && timeSinceLastCommand < voiceControl.commandCooldownMs) {
+        console.log('[Voice] Duplicate button ignored. Button:', matchedButton.id, 'Time since last:', timeSinceLastCommand, 'ms');
+        clearTranscriptUI();
+        return;
+      }
+
+      // Update deduplication tracking with button ID
+      voiceControl.lastProcessedButtonId = matchedButton.id;
+      voiceControl.lastProcessedTime = now;
+
+      console.log('[Voice] Executing command:', matchedButton.label, 'Button ID:', matchedButton.id);
+      updateVoiceMatch('success', `Executing: ${matchedButton.label}`);
+
+      // Send the command
+      sendCommand(matchedButton);
+
+      // Clear the transcript UI
+      clearTranscriptUI();
     }
 
     // Fuzzy Matching Algorithm
