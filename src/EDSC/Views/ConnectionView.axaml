@@ -3,7 +3,7 @@
              xmlns:vm="using:EDSC.ViewModels"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="400" d:DesignHeight="600"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
              x:Class="EDSC.Views.ConnectionView"
              x:DataType="vm:ConnectionViewModel">
 
@@ -11,125 +11,162 @@
         <vm:ConnectionViewModel />
     </Design.DataContext>
 
-    <ScrollViewer>
-        <StackPanel Spacing="20" Margin="20">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-            <!-- Header -->
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="5" Margin="10,5">
             <TextBlock Text="EDSC - Elite Dangerous Ship Controls"
-                       FontSize="18"
+                       FontSize="16"
                        FontWeight="Bold"
+                       TextAlignment="Center"/>
+            <TextBlock Text="Web Control + Face Tracking"
+                       FontSize="14"
+                       FontWeight="SemiBold"
                        TextAlignment="Center"
-                       Margin="0,10,0,0"/>
+                       Foreground="#9AA4B2"/>
 
-            <TextBlock Text="Web Control"
-                       FontSize="20"
-                       FontWeight="Bold"
-                       Margin="0,10,0,0"/>
+        </StackPanel>
 
-            <!-- Status Message -->
-            <Border Background="#1F2937"
+        <!-- Status Message -->
+        <Border Grid.Row="1"
+                Background="#1F2937"
+                Padding="8"
+                CornerRadius="5"
+                Margin="10,0"
+                IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}">
+            <TextBlock Text="{Binding StatusMessage}"
+                       TextWrapping="Wrap"
+                       FontSize="12"
+                       Foreground="#F9FAFB"/>
+        </Border>
+
+        <!-- Main Content - Two Column Layout -->
+        <Grid Grid.Row="2" Margin="10,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Column: QR Code -->
+            <Border Grid.Column="0"
+                    Background="#111827"
                     Padding="10"
                     CornerRadius="5"
-                    IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}">
-                <TextBlock Text="{Binding StatusMessage}"
-                           TextWrapping="Wrap"
-                           FontSize="14"
-                           Foreground="#F9FAFB"/>
-            </Border>
-
-            <!-- QR Code for Web UI -->
-            <Border Background="#111827"
-                   Padding="10"
-                   CornerRadius="5"
-                   Margin="0,10,0,0"
-                   IsVisible="{Binding ShowQrCode}">
-                <StackPanel Spacing="8">
+                    Margin="0,0,5,0"
+                    VerticalAlignment="Top"
+                    IsVisible="{Binding ShowQrCode}">
+                <StackPanel Spacing="6">
                     <TextBlock Text="Web Control (no install)"
                               FontWeight="Bold"
-                              FontSize="14"
+                              FontSize="13"
                               Foreground="#F9FAFB"/>
-                    <TextBlock Text="Scan this QR code to open the browser UI."
-                              FontSize="12"
+                    <TextBlock Text="Scan QR code with phone"
+                              FontSize="11"
                               Foreground="#D1D5DB"
                               TextWrapping="Wrap"/>
                     <StackPanel Spacing="4">
                         <TextBlock Text="Select IP address"
-                                  FontSize="12"
+                                  FontSize="11"
                                   Foreground="#D1D5DB"/>
                         <ComboBox ItemsSource="{Binding LocalIpAddresses}"
                                   SelectedItem="{Binding SelectedLocalIpAddress}"
                                   HorizontalAlignment="Stretch"/>
                     </StackPanel>
                     <Image Source="{Binding QrCodeImage}"
-                           Width="200"
-                           Height="200"
+                           Width="180"
+                           Height="180"
                            Stretch="Uniform"
-                           HorizontalAlignment="Center"/>
+                           HorizontalAlignment="Center"
+                           Margin="0,5"/>
                     <TextBlock Text="{Binding QrCodeUrl}"
-                              FontSize="11"
+                              FontSize="10"
                               Foreground="#D1D5DB"
                               TextWrapping="Wrap"
                               TextAlignment="Center"/>
                 </StackPanel>
             </Border>
 
-            <!-- Face Tracking Preview -->
-            <Border Background="#111827"
-                   Padding="10"
-                   CornerRadius="5"
-                   Margin="0,10,0,0"
-                   IsVisible="{Binding ShowVideoPreview}">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Face Tracking Preview"
-                              FontWeight="Bold"
-                              FontSize="14"
-                              Foreground="#F9FAFB"/>
-                    <TextBlock Text="{Binding VideoStatusText}"
-                              FontSize="12"
-                              Foreground="#D1D5DB"/>
-                    <Image Source="{Binding VideoFrameImage}"
-                           Width="480"
-                           Height="360"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center"/>
-                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+            <!-- Right Column: Face Tracking Preview -->
+            <Border Grid.Column="1"
+                    Background="#111827"
+                    Padding="10"
+                    CornerRadius="5"
+                    Margin="5,0,0,0"
+                    VerticalAlignment="Stretch"
+                    IsVisible="{Binding ShowVideoPreview}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Spacing="3" Margin="0,0,0,8">
+                        <TextBlock Text="Face Tracking Preview"
+                                  FontWeight="Bold"
+                                  FontSize="13"
+                                  Foreground="#F9FAFB"/>
+                        <TextBlock Text="{Binding VideoStatusText}"
+                                  FontSize="11"
+                                  Foreground="#D1D5DB"/>
+                    </StackPanel>
+
+                    <Viewbox Grid.Row="1"
+                             Stretch="Uniform"
+                             StretchDirection="Both"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center">
+                        <Image Source="{Binding VideoFrameImage}"
+                               Width="480"
+                               Height="414"/>
+                    </Viewbox>
+
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal"
+                                Spacing="10"
+                                HorizontalAlignment="Center"
+                                Margin="0,8,0,0">
                         <TextBlock Text="FPS:"
-                                  FontSize="12"
+                                  FontSize="11"
                                   Foreground="#D1D5DB"/>
                         <TextBlock Text="{Binding VideoFps}"
-                                  FontSize="12"
+                                  FontSize="11"
                                   FontWeight="Bold"
                                   Foreground="#10B981"/>
                     </StackPanel>
-                </StackPanel>
+                </Grid>
             </Border>
+        </Grid>
 
-            <!-- Help Text -->
-            <Border Background="#1E293B"
-                   Padding="10"
-                   CornerRadius="5"
-                   Margin="0,10,0,0">
-                <StackPanel Spacing="5">
-                    <TextBlock Text="How it works"
-                              FontWeight="Bold"
-                              FontSize="14"
-                              Foreground="#F9FAFB"/>
-                    <TextBlock TextWrapping="Wrap"
-                              FontSize="12"
-                              Foreground="#E5E7EB">
-                        <Run Text="1. Keep EDSC running on your PC"/>
-                        <LineBreak/>
-                        <Run Text="2. Pick the correct IP address"/>
-                        <LineBreak/>
-                        <Run Text="3. Scan the QR code with your phone"/>
-                        <LineBreak/>
-                        <Run Text="4. Use the browser UI to press buttons"/>
-                        <LineBreak/>
-                        <Run Text="5. Click 'Face Tracking' to start video streaming"/>
-                    </TextBlock>
-                </StackPanel>
-            </Border>
-
-        </StackPanel>
-    </ScrollViewer>
+        <!-- Help Text -->
+        <Border Grid.Row="3"
+                Background="#1E293B"
+                Padding="8"
+                CornerRadius="5"
+                Margin="10,5,10,10">
+            <StackPanel Spacing="3">
+                <TextBlock Text="How it works"
+                          FontWeight="Bold"
+                          FontSize="12"
+                          Foreground="#F9FAFB"/>
+                <TextBlock TextWrapping="Wrap"
+                          FontSize="11"
+                          Foreground="#E5E7EB">
+                    <Run Text="1. Keep EDSC running on your PC"/>
+                    <Run Text=" • "/>
+                    <Run Text="2. Select IP address"/>
+                    <Run Text=" • "/>
+                    <Run Text="3. Scan QR code with phone"/>
+                    <Run Text=" • "/>
+                    <Run Text="4. Click 'Face Tracking' to start"/>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+    </Grid>
 </UserControl>
