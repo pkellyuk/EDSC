@@ -401,6 +401,13 @@ namespace EDSC.Desktop
             {
                 using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
                 {
+                    // Log image dimensions and face box info
+                    Debug.WriteLine($"[DesktopApp] Image dimensions: {image.Width}x{image.Height}");
+                    if (pose.FaceBox != null)
+                    {
+                        Debug.WriteLine($"[DesktopApp] Face box: X={pose.FaceBox.X:F1}, Y={pose.FaceBox.Y:F1}, W={pose.FaceBox.Width:F1}, H={pose.FaceBox.Height:F1}");
+                    }
+
                     image.Mutate(ctx =>
                     {
                         // Draw face bounding box (green rectangle)
@@ -409,17 +416,30 @@ namespace EDSC.Desktop
                             var faceBox = pose.FaceBox;
                             var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
 
+                            // Clamp rectangle to image bounds
+                            rect.X = Math.Max(0, Math.Min(rect.X, image.Width));
+                            rect.Y = Math.Max(0, Math.Min(rect.Y, image.Height));
+                            rect.Width = Math.Max(0, Math.Min(rect.Width, image.Width - rect.X));
+                            rect.Height = Math.Max(0, Math.Min(rect.Height, image.Height - rect.Y));
+
+                            Debug.WriteLine($"[DesktopApp] Drawing rect: X={rect.X:F1}, Y={rect.Y:F1}, W={rect.Width:F1}, H={rect.Height:F1}");
                             ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
                         }
 
                         // Draw landmarks (small circles)
                         if (pose.Landmarks != null)
                         {
+                            int validLandmarks = 0;
                             foreach (var landmark in pose.Landmarks)
                             {
-                                var point = new PointF(landmark.X, landmark.Y);
+                                // Clamp landmarks to image bounds
+                                float x = Math.Max(0, Math.Min(landmark.X, image.Width));
+                                float y = Math.Max(0, Math.Min(landmark.Y, image.Height));
+                                var point = new PointF(x, y);
                                 ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(point, 3f));
+                                validLandmarks++;
                             }
+                            Debug.WriteLine($"[DesktopApp] Drew {validLandmarks} landmarks");
                         }
                     });
 
