@@ -70,7 +70,7 @@ namespace EDSC.Desktop
                         faceTrackingService = new FaceTrackingService();
                         var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
                         await faceTrackingService.InitializeAsync(modelsPath);
-                        Debug.WriteLine("[DesktopApp] Face tracking service initialized");
+                        Console.WriteLine("[DesktopApp] Face tracking service initialized");
 
                         // Initialize Opentrack UDP sender
                         opentrackSender = new OpentrackUdpSender();
@@ -79,8 +79,9 @@ namespace EDSC.Desktop
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"[DesktopApp] Failed to initialize face tracking: {ex.Message}");
-                        Debug.WriteLine("[DesktopApp] Continuing without face tracking");
+                        Console.WriteLine($"[DesktopApp] Failed to initialize face tracking: {ex.Message}");
+                        Console.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
+                        Console.WriteLine("[DesktopApp] Continuing without face tracking");
                         faceTrackingService = null;
                         opentrackSender = null;
                     }

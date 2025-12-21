@@ -1336,11 +1336,11 @@ namespace EDSC.Desktop.Services
 
         private async Task HandleVideoWebSocket(HttpContext context)
         {
-            Debug.WriteLine("[HttpCommandServer] Entry: HandleVideoWebSocket");
+            Console.WriteLine("[HttpCommandServer] Entry: HandleVideoWebSocket");
 
             if (context == null)
             {
-                Debug.WriteLine("[HttpCommandServer] Context is null");
+                Console.WriteLine("[HttpCommandServer] Context is null");
                 return;
             }
 
@@ -1349,7 +1349,7 @@ namespace EDSC.Desktop.Services
             try
             {
                 webSocket = await context.WebSockets.AcceptWebSocketAsync();
-                Debug.WriteLine("[HttpCommandServer] WebSocket connection established");
+                Console.WriteLine("[HttpCommandServer] WebSocket connection established");
 
                 var buffer = new byte[1024 * 1024]; // 1MB buffer for frame data
                 var frameStartTime = DateTime.UtcNow;
@@ -1360,14 +1360,14 @@ namespace EDSC.Desktop.Services
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        Debug.WriteLine("[HttpCommandServer] WebSocket close requested");
+                        Console.WriteLine("[HttpCommandServer] WebSocket close requested");
                         await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
                         break;
                     }
 
                     if (result.MessageType == WebSocketMessageType.Binary)
                     {
-                        Debug.WriteLine($"[HttpCommandServer] Received frame: {result.Count} bytes");
+                        Console.WriteLine($"[HttpCommandServer] Received frame: {result.Count} bytes");
 
                         // Store the frame
                         var frameData = new byte[result.Count];
@@ -1392,15 +1392,27 @@ namespace EDSC.Desktop.Services
                         FrameReceived?.Invoke(this, frameData);
 
                         // Process frame with face tracking service (async, don't wait)
-                        if (_faceTrackingService != null && _faceTrackingService.IsInitialized)
+                        if (_faceTrackingService == null)
                         {
+                            Console.WriteLine("[HttpCommandServer] Face tracking service is null - skipping processing");
+                        }
+                        else if (!_faceTrackingService.IsInitialized)
+                        {
+                            Console.WriteLine("[HttpCommandServer] Face tracking service not initialized - skipping processing");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[HttpCommandServer] Processing frame with face tracking service");
                             _ = Task.Run(async () =>
                             {
                                 try
                                 {
+                                    Console.WriteLine($"[HttpCommandServer] Task.Run started, frame size: {frameData.Length}");
                                     var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
+                                    Console.WriteLine($"[HttpCommandServer] ProcessFrameAsync completed, pose is null: {pose == null}");
                                     if (pose != null)
                                     {
+                                        Console.WriteLine($"[HttpCommandServer] Pose detected: X={pose.X:F2}, Y={pose.Y:F2}, Z={pose.Z:F2}");
                                         // Fire event for UI update
                                         PoseDetected?.Invoke(this, pose);
 
@@ -1413,7 +1425,8 @@ namespace EDSC.Desktop.Services
                                 }
                                 catch (Exception ex)
                                 {
-                                    Debug.WriteLine($"[HttpCommandServer] Error processing frame: {ex.Message}");
+                                    Console.WriteLine($"[HttpCommandServer] Error processing frame: {ex.Message}");
+                                    Console.WriteLine($"[HttpCommandServer] Stack trace: {ex.StackTrace}");
                                 }
                             });
                         }
@@ -1424,11 +1437,11 @@ namespace EDSC.Desktop.Services
                     }
                 }
 
-                Debug.WriteLine("[HttpCommandServer] WebSocket connection closed");
+                Console.WriteLine("[HttpCommandServer] WebSocket connection closed");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[HttpCommandServer] WebSocket error: {ex.Message}");
+                Console.WriteLine($"[HttpCommandServer] WebSocket error: {ex.Message}");
 
                 if (webSocket != null && webSocket.State == WebSocketState.Open)
                 {
