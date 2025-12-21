@@ -68,22 +68,75 @@ namespace EDSC.Desktop.Services
                     {
                         webBuilder.UseKestrel(options =>
                         {
+                            var httpsPort = port + 1;
+
                             if (!string.IsNullOrEmpty(bindAddress) && System.Net.IPAddress.TryParse(bindAddress, out var ip))
                             {
                                 options.Listen(ip, port);
+
+                                try
+                                {
+                                    options.Listen(ip, httpsPort, listenOptions =>
+                                    {
+                                        listenOptions.UseHttps();
+                                    });
+                                    Debug.WriteLine($"[HttpCommandServer] HTTPS enabled on port {httpsPort}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[HttpCommandServer] HTTPS not available: {ex.Message}");
+                                }
+
                                 if (!System.Net.IPAddress.IsLoopback(ip))
                                 {
                                     options.Listen(System.Net.IPAddress.Loopback, port);
+
+                                    try
+                                    {
+                                        options.Listen(System.Net.IPAddress.Loopback, httpsPort, listenOptions =>
+                                        {
+                                            listenOptions.UseHttps();
+                                        });
+                                    }
+                                    catch
+                                    {
+                                    }
                                 }
                             }
                             else
                             {
                                 options.ListenAnyIP(port);
+
+                                try
+                                {
+                                    options.ListenAnyIP(httpsPort, listenOptions =>
+                                    {
+                                        listenOptions.UseHttps();
+                                    });
+                                    Debug.WriteLine($"[HttpCommandServer] HTTPS enabled on port {httpsPort}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"[HttpCommandServer] HTTPS not available: {ex.Message}");
+                                }
                             }
                         });
 
                         webBuilder.Configure(app =>
                         {
+                            app.Use(async (context, next) =>
+                            {
+                                if (!context.Request.IsHttps && context.Request.Host.Host != "localhost" && context.Request.Host.Host != "127.0.0.1")
+                                {
+                                    var httpsUrl = $"https://{context.Request.Host.Host}:{port + 1}{context.Request.Path}{context.Request.QueryString}";
+                                    Debug.WriteLine($"[HttpCommandServer] Redirecting HTTP to HTTPS: {httpsUrl}");
+                                    context.Response.StatusCode = 301;
+                                    context.Response.Headers["Location"] = httpsUrl;
+                                    return;
+                                }
+                                await next();
+                            });
+
                             app.Run(async context =>
                             {
                                 if (context.Request.Path == "/" && context.Request.Method == "GET")
@@ -126,7 +179,7 @@ namespace EDSC.Desktop.Services
                 await _host.StartAsync(cancellationToken);
                 IsRunning = true;
 
-                Debug.WriteLine($"[HttpCommandServer] HTTP server started on port {port}");
+                Debug.WriteLine($"[HttpCommandServer] Server started - HTTP: {port}, HTTPS: {port + 1}");
             }
             catch (Exception ex)
             {
@@ -317,6 +370,61 @@ namespace EDSC.Desktop.Services
       border-radius: 6px;
       cursor: pointer;
       font-size: 12px;
+      transition: all 0.3s ease;
+    }
+    .voice-btn.listening {
+      background: #DC2626;
+      border-color: #EF4444;
+      animation: pulse 1.5s infinite;
+    }
+    .voice-btn.processing {
+      background: #F59E0B;
+      border-color: #FBBF24;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .voice-feedback {
+      background: var(--card);
+      border: 1px solid #2a313d;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .voice-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    .voice-transcript {
+      background: #0f1115;
+      padding: 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      min-height: 24px;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .voice-match {
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .voice-match.success {
+      background: #065F46;
+      color: #D1FAE5;
+    }
+    .voice-match.error {
+      background: #7F1D1D;
+      color: #FEE2E2;
+    }
+    .voice-match.info {
+      background: #1E3A8A;
+      color: #DBEAFE;
     }
   </style>
 </head>
@@ -330,6 +438,15 @@ namespace EDSC.Desktop.Services
     <div class=""toolbar"">
       <button id=""reload"">Reload config</button>
       <button id=""fullscreen"">Fullscreen</button>
+      <button id=""voiceBtn"" class=""voice-btn"">🎤 Voice</button>
+    </div>
+    <div id=""voiceFeedback"" class=""voice-feedback"" style=""display:none;"">
+      <div class=""voice-status"">
+        <span id=""voiceStatusIcon"">⚪</span>
+        <span id=""voiceStatusText"">Ready</span>
+      </div>
+      <div class=""voice-transcript"" id=""voiceTranscript""></div>
+      <div class=""voice-match"" id=""voiceMatch""></div>
     </div>
     <div id=""grid""></div>
   </main>
@@ -339,6 +456,376 @@ namespace EDSC.Desktop.Services
     const reloadBtn = document.getElementById('reload');
     const fullscreenBtn = document.getElementById('fullscreen');
     const iconCache = new Map();
+
+    // Voice control state and configuration
+    const voiceControl = {
+      recognition: null,
+      isListening: false,
+      buttons: [],
+      wakeWord: 'ship',
+      lastTranscript: '',
+      interimResults: true,
+      language: 'en-GB'
+    };
+
+    // UI Update Helper Functions
+    function updateVoiceStatus(state, text) {
+      const statusIcon = document.getElementById('voiceStatusIcon');
+      const statusText = document.getElementById('voiceStatusText');
+
+      if (statusIcon && statusText) {
+        const icons = {
+          'idle': '⚪',
+          'listening': '🔴',
+          'processing': '🟡'
+        };
+        statusIcon.textContent = icons[state] || '⚪';
+        statusText.textContent = text;
+      }
+    }
+
+    function updateVoiceButtonState(state) {
+      const btn = document.getElementById('voiceBtn');
+      if (!btn) return;
+
+      btn.classList.remove('listening', 'processing');
+
+      if (state === 'listening') {
+        btn.classList.add('listening');
+        btn.textContent = '🔴 Listening';
+      } else if (state === 'processing') {
+        btn.classList.add('processing');
+        btn.textContent = '🟡 Processing';
+      } else {
+        btn.textContent = '🎤 Voice';
+      }
+    }
+
+    function updateVoiceTranscript(text) {
+      const el = document.getElementById('voiceTranscript');
+      if (el) {
+        el.textContent = text || '...';
+      }
+    }
+
+    function updateVoiceMatch(type, message) {
+      const el = document.getElementById('voiceMatch');
+      if (el) {
+        el.textContent = message;
+        el.className = 'voice-match ' + type;
+      }
+    }
+
+    // Voice Recognition Initialization
+    function initVoiceRecognition() {
+      console.log('[Voice] Initializing speech recognition...');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        console.error('[Voice] Speech Recognition API not available');
+        console.log('[Voice] window.SpeechRecognition:', typeof window.SpeechRecognition);
+        console.log('[Voice] window.webkitSpeechRecognition:', typeof window.webkitSpeechRecognition);
+        return false;
+      }
+
+      console.log('[Voice] SpeechRecognition API found');
+
+      try {
+        voiceControl.recognition = new SpeechRecognition();
+        voiceControl.recognition.continuous = true;
+        voiceControl.recognition.interimResults = voiceControl.interimResults;
+        voiceControl.recognition.lang = voiceControl.language;
+        voiceControl.recognition.maxAlternatives = 1;
+
+        voiceControl.recognition.onstart = handleVoiceStart;
+        voiceControl.recognition.onresult = handleVoiceResult;
+        voiceControl.recognition.onerror = handleVoiceError;
+        voiceControl.recognition.onend = handleVoiceEnd;
+
+        console.log('[Voice] Recognition initialized successfully');
+        return true;
+      } catch (e) {
+        console.error('[Voice] Error creating SpeechRecognition:', e);
+        updateVoiceMatch('error', 'Failed to initialize: ' + e.message);
+        return false;
+      }
+    }
+
+    // Voice Event Handlers
+    function handleVoiceStart() {
+      console.log('Voice recognition started');
+      updateVoiceStatus('listening', 'Listening...');
+      updateVoiceButtonState('listening');
+    }
+
+    function handleVoiceResult(event) {
+      if (!event || !event.results) {
+        return;
+      }
+
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      const currentTranscript = finalTranscript || interimTranscript;
+      updateVoiceTranscript(currentTranscript);
+
+      if (finalTranscript) {
+        processVoiceCommand(finalTranscript.trim().toLowerCase());
+      }
+    }
+
+    function handleVoiceError(event) {
+      if (!event) {
+        console.error('[Voice] handleVoiceError called with no event');
+        return;
+      }
+
+      console.error('[Voice] Speech recognition error:', event.error);
+      console.error('[Voice] Error event details:', event);
+
+      let errorMessage = 'Voice error: ';
+      switch(event.error) {
+        case 'no-speech':
+          errorMessage += 'No speech detected';
+          break;
+        case 'audio-capture':
+          errorMessage += 'No microphone found';
+          break;
+        case 'not-allowed':
+          errorMessage += 'Microphone permission denied';
+          break;
+        case 'network':
+          errorMessage += 'Network error (requires internet connection)';
+          break;
+        case 'service-not-allowed':
+          errorMessage += 'Speech service not allowed (check browser settings)';
+          break;
+        case 'aborted':
+          errorMessage += 'Recognition aborted';
+          break;
+        default:
+          errorMessage += event.error;
+      }
+
+      console.log('[Voice] Error message:', errorMessage);
+      updateVoiceMatch('error', errorMessage);
+
+      if (['not-allowed', 'audio-capture', 'service-not-allowed'].includes(event.error)) {
+        console.log('[Voice] Critical error, stopping recognition');
+        stopVoiceRecognition();
+      }
+    }
+
+    function handleVoiceEnd() {
+      console.log('Voice recognition ended');
+      if (voiceControl.isListening) {
+        try {
+          voiceControl.recognition.start();
+        } catch(e) {
+          console.error('Failed to restart recognition:', e);
+          stopVoiceRecognition();
+        }
+      } else {
+        updateVoiceStatus('idle', 'Ready');
+        updateVoiceButtonState('idle');
+      }
+    }
+
+    // Wake Word Detection & Command Extraction
+    function processVoiceCommand(transcript) {
+      if (!transcript) {
+        return;
+      }
+
+      console.log('Processing transcript:', transcript);
+      voiceControl.lastTranscript = transcript;
+
+      if (!transcript.includes(voiceControl.wakeWord)) {
+        updateVoiceMatch('info', `Waiting for wake word ""${voiceControl.wakeWord}""...`);
+        return;
+      }
+
+      const wakeWordIndex = transcript.indexOf(voiceControl.wakeWord);
+      const commandText = transcript.substring(wakeWordIndex + voiceControl.wakeWord.length).trim();
+
+      if (!commandText) {
+        updateVoiceMatch('info', 'Wake word detected, but no command specified');
+        return;
+      }
+
+      console.log('Extracted command:', commandText);
+
+      const matchedButton = findBestMatch(commandText);
+
+      if (matchedButton) {
+        updateVoiceStatus('processing', 'Processing...');
+        updateVoiceButtonState('processing');
+        updateVoiceMatch('success', `Matched: ""${matchedButton.label}"" - Executing...`);
+
+        sendCommand(matchedButton);
+      } else {
+        updateVoiceMatch('error', `No match found for ""${commandText}""`);
+      }
+    }
+
+    // Fuzzy Matching Algorithm
+    function findBestMatch(commandText) {
+      if (!commandText || voiceControl.buttons.length === 0) {
+        return null;
+      }
+
+      const normalized = commandText.toLowerCase().trim();
+      let bestMatch = null;
+      let bestScore = 0;
+
+      for (const button of voiceControl.buttons) {
+        if (!button) {
+          continue;
+        }
+
+        const label = (button.label || '').toLowerCase();
+        const id = (button.id || '').toLowerCase();
+
+        if (label === normalized || id === normalized) {
+          return button;
+        }
+
+        let score = 0;
+
+        if (label.includes(normalized)) {
+          score += 100;
+        } else if (normalized.includes(label)) {
+          score += 90;
+        }
+
+        const commandWords = normalized.split(/\s+/);
+        const labelWords = label.split(/\s+/);
+
+        for (const cmdWord of commandWords) {
+          for (const labelWord of labelWords) {
+            if (labelWord.includes(cmdWord) || cmdWord.includes(labelWord)) {
+              score += 30;
+            }
+
+            if (cmdWord.length >= 4 && labelWord.length >= 4) {
+              const similarity = calculateSimilarity(cmdWord, labelWord);
+              if (similarity > 0.7) {
+                score += 20 * similarity;
+              }
+            }
+          }
+        }
+
+        if (label.startsWith(normalized)) {
+          score += 80;
+        }
+
+        if (score > bestScore && score > 30) {
+          bestScore = score;
+          bestMatch = button;
+        }
+      }
+
+      console.log('Best match:', bestMatch ? bestMatch.label : 'none', 'Score:', bestScore);
+      return bestMatch;
+    }
+
+    function calculateSimilarity(str1, str2) {
+      if (!str1 || !str2) {
+        return 0;
+      }
+
+      const len1 = str1.length;
+      const len2 = str2.length;
+      const maxLen = Math.max(len1, len2);
+
+      if (maxLen === 0) return 1.0;
+
+      let matches = 0;
+      const minLen = Math.min(len1, len2);
+
+      for (let i = 0; i < minLen; i++) {
+        if (str1[i] === str2[i]) {
+          matches++;
+        }
+      }
+
+      return matches / maxLen;
+    }
+
+    // Voice Control Toggle Functions
+    function toggleVoiceRecognition() {
+      if (!voiceControl.recognition && !initVoiceRecognition()) {
+        updateVoiceMatch('error', 'Speech recognition not supported in this browser');
+        return;
+      }
+
+      if (voiceControl.isListening) {
+        stopVoiceRecognition();
+      } else {
+        startVoiceRecognition();
+      }
+    }
+
+    function startVoiceRecognition() {
+      console.log('[Voice] startVoiceRecognition called');
+
+      if (!voiceControl.recognition) {
+        console.log('[Voice] Recognition not initialized, initializing now...');
+        if (!initVoiceRecognition()) {
+          console.error('[Voice] Failed to initialize recognition');
+          return;
+        }
+      }
+
+      try {
+        const feedbackEl = document.getElementById('voiceFeedback');
+        if (feedbackEl) {
+          feedbackEl.style.display = 'block';
+        }
+        voiceControl.isListening = true;
+        console.log('[Voice] Calling recognition.start()...');
+        voiceControl.recognition.start();
+        updateVoiceMatch('info', `Say ""${voiceControl.wakeWord}"" followed by a command...`);
+        console.log('[Voice] recognition.start() called successfully');
+      } catch(e) {
+        console.error('[Voice] Failed to start voice recognition:', e);
+        console.error('[Voice] Error details:', e.name, e.message);
+        updateVoiceMatch('error', 'Failed to start: ' + e.message);
+        voiceControl.isListening = false;
+      }
+    }
+
+    function stopVoiceRecognition() {
+      if (voiceControl.recognition) {
+        voiceControl.isListening = false;
+        try {
+          voiceControl.recognition.stop();
+        } catch(e) {
+          console.error('Error stopping recognition:', e);
+        }
+      }
+      updateVoiceStatus('idle', 'Stopped');
+      updateVoiceButtonState('idle');
+
+      setTimeout(() => {
+        if (!voiceControl.isListening) {
+          const feedbackEl = document.getElementById('voiceFeedback');
+          if (feedbackEl) {
+            feedbackEl.style.display = 'none';
+          }
+        }
+      }, 2000);
+    }
 
     async function getIconMarkup(name) {
       if (!name) {
@@ -372,6 +859,7 @@ namespace EDSC.Desktop.Services
           return;
         }
         statusEl.textContent = `Loaded ${buttons.length} buttons`;
+        voiceControl.buttons = buttons;
         const groups = new Map();
         const order = [];
         for (const button of buttons) {
@@ -469,6 +957,18 @@ namespace EDSC.Desktop.Services
         statusEl.textContent = 'Fullscreen not available';
       }
     });
+
+    const voiceBtn = document.getElementById('voiceBtn');
+    if (voiceBtn) {
+      voiceBtn.addEventListener('click', toggleVoiceRecognition);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (voiceControl.isListening) {
+        stopVoiceRecognition();
+      }
+    });
+
     loadConfig();
   </script>
 </body>
