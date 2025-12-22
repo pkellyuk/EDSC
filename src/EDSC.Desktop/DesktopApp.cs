@@ -70,19 +70,16 @@ namespace EDSC.Desktop
                         faceTrackingService = new FaceTrackingService();
                         var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
                         await faceTrackingService.InitializeAsync(modelsPath);
-                        Console.WriteLine("[DesktopApp] Face tracking service initialized");
 
                         // Initialize Opentrack UDP sender
                         opentrackSender = new OpentrackUdpSender();
                         opentrackSender.Connect("127.0.0.1", 4242);
-                        Debug.WriteLine("[DesktopApp] Opentrack UDP sender initialized");
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[DesktopApp] Failed to initialize face tracking: {ex.Message}");
                         Console.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
-                        Console.WriteLine("[DesktopApp] Continuing without face tracking");
-                        faceTrackingService = null;
+                                                faceTrackingService = null;
                         opentrackSender = null;
                     }
 
@@ -99,7 +96,6 @@ namespace EDSC.Desktop
                         httpServer.PoseDetected += (sender, pose) =>
                         {
                             lastPose = pose;
-                            Debug.WriteLine($"[DesktopApp] Pose: {pose}");
                         };
 
                         httpServer.FrameReceived += (sender, frameData) =>

@@ -85,17 +85,13 @@ namespace EDSC.Desktop.Services
 
         public async Task InitializeAsync(string modelsPath)
         {
-            Console.WriteLine("[FaceTrackingService] Entry: InitializeAsync");
-
             if (string.IsNullOrEmpty(modelsPath))
             {
-                Console.WriteLine("[FaceTrackingService] modelsPath is null or empty");
                 throw new ArgumentNullException(nameof(modelsPath));
             }
 
             if (!Directory.Exists(modelsPath))
             {
-                Console.WriteLine($"[FaceTrackingService] Models directory not found: {modelsPath}");
                 throw new DirectoryNotFoundException($"Models directory not found: {modelsPath}");
             }
 
@@ -106,26 +102,19 @@ namespace EDSC.Desktop.Services
 
                 if (!File.Exists(faceDetectionPath))
                 {
-                    Console.WriteLine($"[FaceTrackingService] Face detection model not found: {faceDetectionPath}");
                     throw new FileNotFoundException($"Face detection model not found: {faceDetectionPath}");
                 }
 
                 if (!File.Exists(landmarkPath))
                 {
-                    Console.WriteLine($"[FaceTrackingService] Landmark model not found: {landmarkPath}");
                     throw new FileNotFoundException($"Landmark model not found: {landmarkPath}");
                 }
 
-                Console.WriteLine("[FaceTrackingService] Loading face detection model");
                 _faceDetectionSession = new InferenceSession(faceDetectionPath);
-
-                Console.WriteLine("[FaceTrackingService] Loading landmark model");
                 _landmarkSession = new InferenceSession(landmarkPath);
 
                 GeneratePriors();
                 _isInitialized = true;
-
-                Console.WriteLine("[FaceTrackingService] Initialization complete");
             }
             catch (Exception ex)
             {
@@ -133,23 +122,18 @@ namespace EDSC.Desktop.Services
                 Console.WriteLine($"[FaceTrackingService] Stack trace: {ex.StackTrace}");
                 throw;
             }
-
-            Console.WriteLine("[FaceTrackingService] Exit: InitializeAsync");
             await Task.CompletedTask;
         }
 
         public async Task<HeadPose?> ProcessFrameAsync(byte[] frameData)
         {
-            Console.WriteLine($"[FaceTracking] === PROCESS FRAME CALLED: {frameData?.Length ?? 0} bytes ===");
             if (frameData == null || frameData.Length == 0)
             {
-                Console.WriteLine("[FaceTracking] Frame data is null or empty");
                 return null;
             }
 
             if (!_isInitialized || _faceDetectionSession == null || _landmarkSession == null)
             {
-                Console.WriteLine("[FaceTracking] Service not initialized");
                 return null;
             }
 
@@ -205,10 +189,8 @@ namespace EDSC.Desktop.Services
 
         private async Task<(float x, float y, float width, float height)?> DetectFaceAsync(Image<Rgb24> image)
         {
-            Console.WriteLine("[FaceTracking] === DETECT FACE CALLED ===");
             if (_faceDetectionSession == null)
             {
-                Console.WriteLine("[FaceTracking] Face detection session is null");
                 return null;
             }
 
