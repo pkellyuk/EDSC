@@ -12,6 +12,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using SixLabors.ImageSharp;
@@ -70,6 +71,7 @@ namespace EDSC.Desktop
                         faceTrackingService = new FaceTrackingService();
                         var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
                         await faceTrackingService.InitializeAsync(modelsPath);
+                        await BindTrackingSensitivityAsync(connectionViewModel, faceTrackingService, configService);
 
                         // Initialize Opentrack UDP sender
                         opentrackSender = new OpentrackUdpSender();
@@ -227,6 +229,116 @@ namespace EDSC.Desktop
             {
                 viewModel.SetQrCode(qrBitmap, url);
             }
+        }
+
+        private const double TrackingScaleMin = 0.1;
+        private const double TrackingScaleMax = 100.0;
+
+        private static async Task BindTrackingSensitivityAsync(
+            ConnectionViewModel viewModel,
+            FaceTrackingService faceTrackingService,
+            IConfigurationService configService)
+        {
+            if (viewModel == null || faceTrackingService == null || configService == null)
+            {
+                return;
+            }
+
+            var config = await configService.LoadConfigurationAsync() ?? new AppConfig();
+            if (config.Tracking == null)
+            {
+                config.Tracking = new TrackingConfig();
+            }
+
+            ApplyTrackingConfigToViewModel(config.Tracking, viewModel);
+            ApplyTrackingConfigToService(viewModel, faceTrackingService);
+
+            CancellationTokenSource? saveCts = null;
+
+            viewModel.PropertyChanged += async (_, args) =>
+            {
+                if (args == null || string.IsNullOrEmpty(args.PropertyName))
+                {
+                    return;
+                }
+
+                if (!IsTrackingProperty(args.PropertyName))
+                {
+                    return;
+                }
+
+                ApplyTrackingConfigToService(viewModel, faceTrackingService);
+
+                saveCts?.Cancel();
+                var currentCts = new CancellationTokenSource();
+                saveCts = currentCts;
+
+                try
+                {
+                    await Task.Delay(250, currentCts.Token);
+                }
+                catch (TaskCanceledException)
+                {
+                    return;
+                }
+
+                if (currentCts.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                UpdateTrackingConfigFromViewModel(config, viewModel);
+                config.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                config.LastUpdatedBy = "desktop-tracking";
+                await configService.SaveConfigurationAsync(config);
+            };
+        }
+
+        private static bool IsTrackingProperty(string propertyName)
+        {
+            return propertyName == nameof(ConnectionViewModel.TranslationScale)
+                || propertyName == nameof(ConnectionViewModel.YawScale)
+                || propertyName == nameof(ConnectionViewModel.RotationScale)
+                || propertyName == nameof(ConnectionViewModel.RollScale);
+        }
+
+        private static void ApplyTrackingConfigToViewModel(TrackingConfig config, ConnectionViewModel viewModel)
+        {
+            viewModel.TranslationScale = ClampTrackingScale(config.TranslationScale);
+            viewModel.YawScale = ClampTrackingScale(config.YawScale);
+            viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
+            viewModel.RollScale = ClampTrackingScale(config.RollScale);
+        }
+
+        private static void ApplyTrackingConfigToService(ConnectionViewModel viewModel, FaceTrackingService faceTrackingService)
+        {
+            faceTrackingService.TranslationScale = (float)viewModel.TranslationScale;
+            faceTrackingService.YawScale = (float)viewModel.YawScale;
+            faceTrackingService.RotationScale = (float)viewModel.RotationScale;
+            faceTrackingService.RollScale = (float)viewModel.RollScale;
+        }
+
+        private static void UpdateTrackingConfigFromViewModel(AppConfig config, ConnectionViewModel viewModel)
+        {
+            if (config.Tracking == null)
+            {
+                config.Tracking = new TrackingConfig();
+            }
+
+            config.Tracking.TranslationScale = viewModel.TranslationScale;
+            config.Tracking.YawScale = viewModel.YawScale;
+            config.Tracking.PitchScale = viewModel.RotationScale;
+            config.Tracking.RollScale = viewModel.RollScale;
+        }
+
+        private static double ClampTrackingScale(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0)
+            {
+                return 1.0;
+            }
+
+            return Math.Clamp(value, TrackingScaleMin, TrackingScaleMax);
         }
 
         private async Task RebindCommandServerAsync(string ipAddress, int port)
@@ -391,8 +503,6 @@ namespace EDSC.Desktop
 
         private static Bitmap DrawOverlays(byte[] frameData, HeadPose pose)
         {
-            Debug.WriteLine("[DesktopApp] Entry: DrawOverlays");
-
             try
             {
                 using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
@@ -435,10 +545,6 @@ namespace EDSC.Desktop
                 {
                     return new Bitmap(ms);
                 }
-            }
-            finally
-            {
-                Debug.WriteLine("[DesktopApp] Exit: DrawOverlays");
             }
         }
 

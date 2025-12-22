@@ -24,6 +24,10 @@ namespace EDSC.ViewModels
         private Bitmap? _videoFrameImage;
         private string _videoStatusText;
         private string _videoFps;
+        private double _translationScale;
+        private double _yawScale;
+        private double _rotationScale;
+        private double _rollScale;
 
         public string StatusMessage
         {
@@ -232,6 +236,78 @@ namespace EDSC.ViewModels
             }
         }
 
+        public double TranslationScale
+        {
+            get
+            {
+                return _translationScale;
+            }
+            set
+            {
+                if (Math.Abs(_translationScale - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _translationScale = value;
+                OnPropertyChanged(nameof(TranslationScale));
+            }
+        }
+
+        public double YawScale
+        {
+            get
+            {
+                return _yawScale;
+            }
+            set
+            {
+                if (Math.Abs(_yawScale - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _yawScale = value;
+                OnPropertyChanged(nameof(YawScale));
+            }
+        }
+
+        public double RotationScale
+        {
+            get
+            {
+                return _rotationScale;
+            }
+            set
+            {
+                if (Math.Abs(_rotationScale - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _rotationScale = value;
+                OnPropertyChanged(nameof(RotationScale));
+            }
+        }
+
+        public double RollScale
+        {
+            get
+            {
+                return _rollScale;
+            }
+            set
+            {
+                if (Math.Abs(_rollScale - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _rollScale = value;
+                OnPropertyChanged(nameof(RollScale));
+            }
+        }
+
         public ConnectionViewModel()
         {
             Debug.WriteLine("[ConnectionVM] Entry: Constructor");
@@ -248,6 +324,10 @@ namespace EDSC.ViewModels
             _videoFrameImage = null;
             _videoStatusText = "Waiting for video stream...";
             _videoFps = "0.0";
+            _translationScale = 1.0;
+            _yawScale = 1.0;
+            _rotationScale = 1.0;
+            _rollScale = 1.0;
 
             Debug.WriteLine("[ConnectionVM] Exit: Constructor");
         }

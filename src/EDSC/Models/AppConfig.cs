@@ -14,6 +14,9 @@ namespace EDSC.Models
         [JsonPropertyName("buttons")]
         public List<ButtonConfig> Buttons { get; set; }
 
+        [JsonPropertyName("tracking")]
+        public TrackingConfig Tracking { get; set; }
+
         [JsonPropertyName("configVersion")]
         public long ConfigVersion { get; set; }
 
@@ -27,6 +30,7 @@ namespace EDSC.Models
         {
             Server = new ServerConfig();
             Buttons = new List<ButtonConfig>();
+            Tracking = new TrackingConfig();
             ConfigVersion = 1;
             LastUpdatedUtc = 0;
             LastUpdatedBy = string.Empty;

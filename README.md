@@ -22,6 +22,7 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 - HTTP (port 9000) and HTTPS (port 9001) command server
 - Voice control with continuous listening
 - Keyboard simulation for Elite Dangerous
+- Face tracking preview + Opentrack UDP output
 - JSON configuration for buttons (categories + SVG icons)
 - IP selector with common addresses (192.168.x.x) prioritized
 
@@ -116,6 +117,32 @@ http://<pc-ip>:9000/web
 ```
 
 The web UI groups buttons by category and shows SVG icons above the labels. It also includes a Fullscreen toggle in the toolbar.
+
+## Face Tracking
+
+EDSC can run AITrack-compatible face tracking using ONNX models and stream the pose to Opentrack (UDP 127.0.0.1:4242).
+
+**Setup**
+- Download `detection.onnx` and `lm_fast_exp1.onnx` from the AITrack repo or release.
+- Copy the files into `src/EDSC.Desktop/Models` (they are copied to the build output on build).
+
+**Using it**
+- Open the web UI and click "Face Tracking" to start the camera stream.
+- The desktop app shows a preview with a face box + landmarks.
+- Use the sliders under "Tracking Sensitivity" to adjust position and rotation scaling.
+
+**Persistence**
+Tracking sensitivity is saved to `config.json` under `tracking`:
+```json
+{
+  "tracking": {
+    "translationScale": 1.0,
+    "yawScale": 1.0,
+    "pitchScale": 1.0,
+    "rollScale": 1.0
+  }
+}
+```
 
 ## Voice Commands
 

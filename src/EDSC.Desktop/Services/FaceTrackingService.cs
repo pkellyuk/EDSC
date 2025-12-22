@@ -35,6 +35,7 @@ namespace EDSC.Desktop.Services
         private const float LandmarkMean = 0.445313568967f;
         private const float LandmarkStd = 0.269246187f;
         private static readonly float[] DetectionVariance = new[] { 0.1f, 0.2f };
+        private const float BaseTranslationScale = 0.1f;
 
         // 3D face model points (simplified - key facial landmarks)
         private static readonly Vector3[] Model3DPoints = new[]
@@ -82,6 +83,14 @@ namespace EDSC.Desktop.Services
                 return _isInitialized;
             }
         }
+
+        public float TranslationScale { get; set; } = 1f;
+
+        public float YawScale { get; set; } = 1f;
+
+        public float RotationScale { get; set; } = 1f;
+
+        public float RollScale { get; set; } = 1f;
 
         public async Task InitializeAsync(string modelsPath)
         {
@@ -595,15 +604,19 @@ namespace EDSC.Desktop.Services
                 // Convert 2D center to 3D position
                 float x = (centerX - cx) * z / focalLength;
                 float y = (centerY - cy) * z / focalLength;
+                float translationScale = BaseTranslationScale * TranslationScale;
+                float yawScale = YawScale;
+                float pitchScale = RotationScale;
+                float rollScale = RollScale;
 
                 return new HeadPose
                 {
-                    X = x,
-                    Y = -y,  // Invert Y to match typical coordinate system
-                    Z = z,
-                    Yaw = yaw,
-                    Pitch = pitch,
-                    Roll = roll
+                    X = x * translationScale,
+                    Y = -y * translationScale,  // Invert Y to match typical coordinate system
+                    Z = z * translationScale,
+                    Yaw = yaw * yawScale,
+                    Pitch = pitch * pitchScale,
+                    Roll = roll * rollScale
                 };
             }
             catch (Exception ex)

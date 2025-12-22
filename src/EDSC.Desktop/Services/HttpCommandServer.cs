@@ -177,12 +177,12 @@ namespace EDSC.Desktop.Services
                                 {
                                     Debug.WriteLine("[HttpCommandServer] Health check requested");
                                     context.Response.ContentType = "application/json";
-                                    var healthJson = JsonSerializer.Serialize(new
-                                    {
-                                        service = "EDSC",
-                                        status = "running",
-                                        version = "1.0.0"
-                                    });
+                                        var healthJson = JsonSerializer.Serialize(new
+                                        {
+                                            service = "EDSC",
+                                            status = "running",
+                                            version = "1.2.0"
+                                        });
                                     await context.Response.WriteAsync(healthJson);
                                 }
                                 else if (context.Request.Path == "/config" && context.Request.Method == "GET")
