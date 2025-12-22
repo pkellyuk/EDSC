@@ -23,6 +23,8 @@ namespace EDSC.Desktop.Services
         private InferenceSession? _landmarkSession;
         private bool _isInitialized;
         private readonly List<Prior> _priors = new List<Prior>();
+        private readonly object _smoothingLock = new object();
+        private HeadPose? _lastSmoothedPose;
 
         // Model input sizes
         private const int FaceDetectionWidth = 160;
@@ -92,6 +94,8 @@ namespace EDSC.Desktop.Services
 
         public float RollScale { get; set; } = 1f;
 
+        public float SmoothingStrength { get; set; } = 0.35f;
+
         public async Task InitializeAsync(string modelsPath)
         {
             if (string.IsNullOrEmpty(modelsPath))
@@ -155,6 +159,7 @@ namespace EDSC.Desktop.Services
                     var faceBox = await DetectFaceAsync(image);
                     if (faceBox == null)
                     {
+                        ResetSmoothing();
                         return null;
                     }
 
@@ -162,6 +167,7 @@ namespace EDSC.Desktop.Services
                     var landmarks = await DetectLandmarksAsync(image, faceBox.Value);
                     if (landmarks == null || landmarks.Length != 66)
                     {
+                        ResetSmoothing();
                         return null;
                     }
 
@@ -184,6 +190,12 @@ namespace EDSC.Desktop.Services
                             X = lm.X,
                             Y = lm.Y
                         }).ToArray();
+
+                        pose = ApplySmoothing(pose);
+                    }
+                    else
+                    {
+                        ResetSmoothing();
                     }
 
                     return pose;
@@ -192,6 +204,7 @@ namespace EDSC.Desktop.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[FaceTrackingService] Error processing frame: {ex.Message}");
+                ResetSmoothing();
                 return null;
             }
         }
@@ -624,6 +637,75 @@ namespace EDSC.Desktop.Services
                 Console.WriteLine($"[FaceTrackingService] Pose calculation error: {ex.Message}");
                 return null;
             }
+        }
+
+        private void ResetSmoothing()
+        {
+            lock (_smoothingLock)
+            {
+                _lastSmoothedPose = null;
+            }
+        }
+
+        private HeadPose ApplySmoothing(HeadPose pose)
+        {
+            if (pose == null)
+            {
+                return pose;
+            }
+
+            float strength = Math.Clamp(SmoothingStrength, 0f, 0.95f);
+
+            lock (_smoothingLock)
+            {
+                if (strength <= 0f)
+                {
+                    _lastSmoothedPose = ClonePose(pose);
+                    return pose;
+                }
+
+                if (_lastSmoothedPose == null)
+                {
+                    _lastSmoothedPose = ClonePose(pose);
+                    return pose;
+                }
+
+                float alpha = 1f - strength;
+                var smoothed = new HeadPose
+                {
+                    X = Lerp(_lastSmoothedPose.X, pose.X, alpha),
+                    Y = Lerp(_lastSmoothedPose.Y, pose.Y, alpha),
+                    Z = Lerp(_lastSmoothedPose.Z, pose.Z, alpha),
+                    Yaw = Lerp(_lastSmoothedPose.Yaw, pose.Yaw, alpha),
+                    Pitch = Lerp(_lastSmoothedPose.Pitch, pose.Pitch, alpha),
+                    Roll = Lerp(_lastSmoothedPose.Roll, pose.Roll, alpha),
+                    FaceBox = pose.FaceBox,
+                    Landmarks = pose.Landmarks
+                };
+
+                _lastSmoothedPose = ClonePose(smoothed);
+                return smoothed;
+            }
+        }
+
+        private static double Lerp(double from, double to, float t)
+        {
+            return from + (to - from) * t;
+        }
+
+        private static HeadPose ClonePose(HeadPose pose)
+        {
+            return new HeadPose
+            {
+                X = pose.X,
+                Y = pose.Y,
+                Z = pose.Z,
+                Yaw = pose.Yaw,
+                Pitch = pose.Pitch,
+                Roll = pose.Roll,
+                FaceBox = pose.FaceBox,
+                Landmarks = pose.Landmarks
+            };
         }
 
         public void Dispose()

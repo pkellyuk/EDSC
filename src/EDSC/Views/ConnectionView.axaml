@@ -150,7 +150,7 @@
                                   FontSize="12"
                                   Foreground="#F9FAFB"/>
                         <Grid ColumnDefinitions="Auto,*,Auto"
-                              RowDefinitions="Auto,Auto,Auto,Auto">
+                              RowDefinitions="Auto,Auto,Auto,Auto,Auto">
                             <TextBlock Grid.Row="0"
                                       Grid.Column="0"
                                       Text="Position"
@@ -239,6 +239,27 @@
                                       Foreground="#10B981"
                                       VerticalAlignment="Center"
                                       Margin="0,0,0,6"/>
+                            <TextBlock Grid.Row="4"
+                                      Grid.Column="0"
+                                      Text="Smoothing"
+                                      FontSize="11"
+                                      Foreground="#D1D5DB"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,8,0"/>
+                            <Slider Grid.Row="4"
+                                    Grid.Column="1"
+                                    Minimum="0"
+                                    Maximum="0.95"
+                                    SmallChange="0.01"
+                                    LargeChange="0.05"
+                                    Value="{Binding SmoothingStrength}"
+                                    Margin="0,0,8,0"/>
+                            <TextBlock Grid.Row="4"
+                                      Grid.Column="2"
+                                      Text="{Binding SmoothingStrength, StringFormat='{}{0:0%}'}"
+                                      FontSize="11"
+                                      Foreground="#10B981"
+                                      VerticalAlignment="Center"/>
                         </Grid>
                     </StackPanel>
                 </Grid>

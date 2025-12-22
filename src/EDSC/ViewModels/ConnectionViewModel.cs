@@ -28,6 +28,7 @@ namespace EDSC.ViewModels
         private double _yawScale;
         private double _rotationScale;
         private double _rollScale;
+        private double _smoothingStrength;
 
         public string StatusMessage
         {
@@ -308,6 +309,24 @@ namespace EDSC.ViewModels
             }
         }
 
+        public double SmoothingStrength
+        {
+            get
+            {
+                return _smoothingStrength;
+            }
+            set
+            {
+                if (Math.Abs(_smoothingStrength - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _smoothingStrength = value;
+                OnPropertyChanged(nameof(SmoothingStrength));
+            }
+        }
+
         public ConnectionViewModel()
         {
             Debug.WriteLine("[ConnectionVM] Entry: Constructor");
@@ -328,6 +347,7 @@ namespace EDSC.ViewModels
             _yawScale = 1.0;
             _rotationScale = 1.0;
             _rollScale = 1.0;
+            _smoothingStrength = 0.35;
 
             Debug.WriteLine("[ConnectionVM] Exit: Constructor");
         }

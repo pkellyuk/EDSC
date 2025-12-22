@@ -18,5 +18,8 @@ namespace EDSC.Models
 
         [JsonPropertyName("rollScale")]
         public double RollScale { get; set; } = 1.0;
+
+        [JsonPropertyName("smoothingStrength")]
+        public double SmoothingStrength { get; set; } = 0.35;
     }
 }

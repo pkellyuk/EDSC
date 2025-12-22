@@ -233,6 +233,8 @@ namespace EDSC.Desktop
 
         private const double TrackingScaleMin = 0.1;
         private const double TrackingScaleMax = 100.0;
+        private const double TrackingSmoothingMin = 0.0;
+        private const double TrackingSmoothingMax = 0.95;
 
         private static async Task BindTrackingSensitivityAsync(
             ConnectionViewModel viewModel,
@@ -299,7 +301,8 @@ namespace EDSC.Desktop
             return propertyName == nameof(ConnectionViewModel.TranslationScale)
                 || propertyName == nameof(ConnectionViewModel.YawScale)
                 || propertyName == nameof(ConnectionViewModel.RotationScale)
-                || propertyName == nameof(ConnectionViewModel.RollScale);
+                || propertyName == nameof(ConnectionViewModel.RollScale)
+                || propertyName == nameof(ConnectionViewModel.SmoothingStrength);
         }
 
         private static void ApplyTrackingConfigToViewModel(TrackingConfig config, ConnectionViewModel viewModel)
@@ -308,6 +311,7 @@ namespace EDSC.Desktop
             viewModel.YawScale = ClampTrackingScale(config.YawScale);
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
+            viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
         }
 
         private static void ApplyTrackingConfigToService(ConnectionViewModel viewModel, FaceTrackingService faceTrackingService)
@@ -316,6 +320,7 @@ namespace EDSC.Desktop
             faceTrackingService.YawScale = (float)viewModel.YawScale;
             faceTrackingService.RotationScale = (float)viewModel.RotationScale;
             faceTrackingService.RollScale = (float)viewModel.RollScale;
+            faceTrackingService.SmoothingStrength = (float)viewModel.SmoothingStrength;
         }
 
         private static void UpdateTrackingConfigFromViewModel(AppConfig config, ConnectionViewModel viewModel)
@@ -329,6 +334,7 @@ namespace EDSC.Desktop
             config.Tracking.YawScale = viewModel.YawScale;
             config.Tracking.PitchScale = viewModel.RotationScale;
             config.Tracking.RollScale = viewModel.RollScale;
+            config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
         }
 
         private static double ClampTrackingScale(double value)
@@ -339,6 +345,16 @@ namespace EDSC.Desktop
             }
 
             return Math.Clamp(value, TrackingScaleMin, TrackingScaleMax);
+        }
+
+        private static double ClampTrackingSmoothing(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+            {
+                return 0.0;
+            }
+
+            return Math.Clamp(value, TrackingSmoothingMin, TrackingSmoothingMax);
         }
 
         private async Task RebindCommandServerAsync(string ipAddress, int port)
