@@ -173,6 +173,7 @@ namespace EDSC.Desktop.Services
 
                             app.Run(async context =>
                             {
+                                Console.WriteLine($"=== HTTP REQUEST: {context.Request.Method} {context.Request.Path} ===");
                                 if (context.Request.Path == "/" && context.Request.Method == "GET")
                                 {
                                     Debug.WriteLine("[HttpCommandServer] Health check requested");
@@ -203,10 +204,12 @@ namespace EDSC.Desktop.Services
                                 }
                                 else if (context.Request.Path == "/video" && context.WebSockets.IsWebSocketRequest)
                                 {
+                                    Console.WriteLine($"[HttpCommandServer] WebSocket route matched: {context.Request.Path}");
                                     await HandleVideoWebSocket(context);
                                 }
                                 else
                                 {
+                                    Console.WriteLine($"[HttpCommandServer] Route not matched: Path={context.Request.Path}, IsWebSocket={context.WebSockets.IsWebSocketRequest}");
                                     context.Response.StatusCode = 404;
                                 }
                             });
@@ -1354,9 +1357,12 @@ namespace EDSC.Desktop.Services
                 var buffer = new byte[1024 * 1024]; // 1MB buffer for frame data
                 var frameStartTime = DateTime.UtcNow;
 
+                Console.WriteLine("[HttpCommandServer] Starting WebSocket receive loop");
                 while (webSocket.State == WebSocketState.Open)
                 {
+                    Console.WriteLine("[HttpCommandServer] Waiting for WebSocket message...");
                     var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    Console.WriteLine($"[HttpCommandServer] Received WebSocket message: type={result.MessageType}, count={result.Count}");
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {

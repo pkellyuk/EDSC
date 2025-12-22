@@ -408,7 +408,6 @@ namespace EDSC.Desktop
                         {
                             var faceBox = pose.FaceBox;
                             var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
-
                             ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
                         }
 

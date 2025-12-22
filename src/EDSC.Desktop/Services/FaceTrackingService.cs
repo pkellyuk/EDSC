@@ -22,12 +22,19 @@ namespace EDSC.Desktop.Services
         private InferenceSession? _faceDetectionSession;
         private InferenceSession? _landmarkSession;
         private bool _isInitialized;
+        private readonly List<Prior> _priors = new List<Prior>();
 
         // Model input sizes
         private const int FaceDetectionWidth = 160;
         private const int FaceDetectionHeight = 120;
         private const int LandmarkWidth = 114;
         private const int LandmarkHeight = 114;
+        private const float DetectionScoreThreshold = 0.8f;
+        private const float DetectionNmsThreshold = 0.5f;
+        private const int DetectionTopK = 7;
+        private const float LandmarkMean = 0.445313568967f;
+        private const float LandmarkStd = 0.269246187f;
+        private static readonly float[] DetectionVariance = new[] { 0.1f, 0.2f };
 
         // 3D face model points (simplified - key facial landmarks)
         private static readonly Vector3[] Model3DPoints = new[]
@@ -42,6 +49,31 @@ namespace EDSC.Desktop.Services
 
         // Corresponding 2D landmark indices (0-based, out of 66 landmarks)
         private static readonly int[] LandmarkIndices = new[] { 30, 8, 36, 45, 48, 54 };
+
+        private struct Prior
+        {
+            public float X;
+            public float Y;
+            public float Width;
+            public float Height;
+
+            public Prior(float x, float y, float width, float height)
+            {
+                X = x;
+                Y = y;
+                Width = width;
+                Height = height;
+            }
+        }
+
+        private struct FaceCandidate
+        {
+            public float X;
+            public float Y;
+            public float Width;
+            public float Height;
+            public float Score;
+        }
 
         public bool IsInitialized
         {
@@ -90,6 +122,7 @@ namespace EDSC.Desktop.Services
                 Console.WriteLine("[FaceTrackingService] Loading landmark model");
                 _landmarkSession = new InferenceSession(landmarkPath);
 
+                GeneratePriors();
                 _isInitialized = true;
 
                 Console.WriteLine("[FaceTrackingService] Initialization complete");
@@ -107,13 +140,16 @@ namespace EDSC.Desktop.Services
 
         public async Task<HeadPose?> ProcessFrameAsync(byte[] frameData)
         {
+            Console.WriteLine($"[FaceTracking] === PROCESS FRAME CALLED: {frameData?.Length ?? 0} bytes ===");
             if (frameData == null || frameData.Length == 0)
             {
+                Console.WriteLine("[FaceTracking] Frame data is null or empty");
                 return null;
             }
 
             if (!_isInitialized || _faceDetectionSession == null || _landmarkSession == null)
             {
+                Console.WriteLine("[FaceTracking] Service not initialized");
                 return null;
             }
 
@@ -169,32 +205,35 @@ namespace EDSC.Desktop.Services
 
         private async Task<(float x, float y, float width, float height)?> DetectFaceAsync(Image<Rgb24> image)
         {
+            Console.WriteLine("[FaceTracking] === DETECT FACE CALLED ===");
             if (_faceDetectionSession == null)
             {
+                Console.WriteLine("[FaceTracking] Face detection session is null");
                 return null;
             }
 
             try
             {
-                // Resize image to detection size
+                if (_priors.Count == 0)
+                {
+                    GeneratePriors();
+                }
+
                 using (var resized = image.Clone(ctx => ctx.Resize(FaceDetectionWidth, FaceDetectionHeight)))
                 {
-                    // Convert to tensor (1, 3, 120, 160) - NCHW format
                     var tensor = new DenseTensor<float>(new[] { 1, 3, FaceDetectionHeight, FaceDetectionWidth });
 
-                    // Fill tensor with normalized RGB values
                     for (int y = 0; y < FaceDetectionHeight; y++)
                     {
                         for (int x = 0; x < FaceDetectionWidth; x++)
                         {
                             var pixel = resized[x, y];
-                            tensor[0, 0, y, x] = pixel.R / 255f;
-                            tensor[0, 1, y, x] = pixel.G / 255f;
-                            tensor[0, 2, y, x] = pixel.B / 255f;
+                            tensor[0, 0, y, x] = pixel.B;
+                            tensor[0, 1, y, x] = pixel.G;
+                            tensor[0, 2, y, x] = pixel.R;
                         }
                     }
 
-                    // Run inference
                     var inputs = new List<NamedOnnxValue>
                     {
                         NamedOnnxValue.CreateFromTensor("input", tensor)
@@ -202,51 +241,95 @@ namespace EDSC.Desktop.Services
 
                     using (var results = _faceDetectionSession.Run(inputs))
                     {
-                        var output = results.FirstOrDefault()?.AsEnumerable<float>().ToArray();
+                        var loc = results.First(r => r.Name == "loc").AsTensor<float>().ToArray();
+                        var conf = results.First(r => r.Name == "conf").AsTensor<float>().ToArray();
+                        var iou = results.First(r => r.Name == "iou").AsTensor<float>().ToArray();
 
-                        if (output == null || output.Length < 4)
+                        int priorCount = _priors.Count;
+                        if (loc.Length < priorCount * 14 || conf.Length < priorCount * 2 || iou.Length < priorCount)
                         {
                             return null;
                         }
 
-                        // Check if output format appears to be [x1, y1, x2, y2] (corner coordinates)
-                        // vs [x, y, width, height] format
-                        bool isCornerFormat = output[2] > output[0] && output[3] > output[1]; // x2 > x1 and y2 > y1
-
-                        float scaleX = (float)image.Width;
-                        float scaleY = (float)image.Height;
-
-                        if (isCornerFormat)
+                        var candidates = new List<FaceCandidate>(priorCount);
+                        for (int i = 0; i < priorCount; i++)
                         {
-                            // Convert from [x1, y1, x2, y2] to [x, y, width, height]
-                            float x1 = (output[0] + 1f) * 0.5f * scaleX; // Normalize from [-1,1] to [0,1] then scale
-                            float y1 = (output[1] + 1f) * 0.5f * scaleY;
-                            float x2 = (output[2] + 1f) * 0.5f * scaleX;
-                            float y2 = (output[3] + 1f) * 0.5f * scaleY;
+                            float clsScore = conf[i * 2 + 1];
+                            float iouScore = iou[i];
+                            if (iouScore < 0f)
+                            {
+                                iouScore = 0f;
+                            }
+                            else if (iouScore > 1f)
+                            {
+                                iouScore = 1f;
+                            }
 
-                            return (
-                                Math.Max(0, x1),
-                                Math.Max(0, y1),
-                                Math.Max(0, x2 - x1),
-                                Math.Max(0, y2 - y1)
-                            );
+                            float score = MathF.Sqrt(clsScore * iouScore);
+                            if (score < DetectionScoreThreshold)
+                            {
+                                continue;
+                            }
+
+                            var prior = _priors[i];
+                            int locOffset = i * 14;
+                            float cx = (prior.X + loc[locOffset + 0] * DetectionVariance[0] * prior.Width) * FaceDetectionWidth;
+                            float cy = (prior.Y + loc[locOffset + 1] * DetectionVariance[0] * prior.Height) * FaceDetectionHeight;
+                            float w = prior.Width * MathF.Exp(loc[locOffset + 2] * DetectionVariance[0]) * FaceDetectionWidth;
+                            float h = prior.Height * MathF.Exp(loc[locOffset + 3] * DetectionVariance[1]) * FaceDetectionHeight;
+
+                            candidates.Add(new FaceCandidate
+                            {
+                                X = cx - w / 2f,
+                                Y = cy - h / 2f,
+                                Width = w,
+                                Height = h,
+                                Score = score
+                            });
                         }
-                        else
+
+                        if (candidates.Count == 0)
                         {
-                            // Assume [centerX, centerY, width, height] format, normalize from [-1,1] to [0,1]
-                            float centerX = (output[0] + 1f) * 0.5f * scaleX;
-                            float centerY = (output[1] + 1f) * 0.5f * scaleY;
-                            float width = (output[2] + 1f) * 0.5f * scaleX;
-                            float height = (output[3] + 1f) * 0.5f * scaleY;
-
-                            // Convert from center format to top-left format
-                            return (
-                                Math.Max(0, centerX - width / 2),
-                                Math.Max(0, centerY - height / 2),
-                                Math.Max(0, width),
-                                Math.Max(0, height)
-                            );
+                            return null;
                         }
+
+                        var kept = ApplyNms(candidates, DetectionScoreThreshold, DetectionNmsThreshold, DetectionTopK);
+                        if (kept.Count == 0)
+                        {
+                            return null;
+                        }
+
+                        float scaleX = (float)image.Width / FaceDetectionWidth;
+                        float scaleY = (float)image.Height / FaceDetectionHeight;
+
+                        int bestIndex = 0;
+                        float bestDistance = float.MaxValue;
+                        float imageCenterX = image.Width / 2f;
+                        float imageCenterY = image.Height / 2f;
+
+                        for (int i = 0; i < kept.Count; i++)
+                        {
+                            var face = kept[i];
+                            float centerX = (face.X + face.Width / 2f) * scaleX;
+                            float centerY = (face.Y + face.Height / 2f) * scaleY;
+                            float dx = imageCenterX - centerX;
+                            float dy = imageCenterY - centerY;
+                            float distance = dx * dx + dy * dy;
+
+                            if (distance < bestDistance)
+                            {
+                                bestDistance = distance;
+                                bestIndex = i;
+                            }
+                        }
+
+                        var selected = kept[bestIndex];
+                        float scaledX = selected.X * scaleX;
+                        float scaledY = selected.Y * scaleY;
+                        float scaledW = selected.Width * scaleX;
+                        float scaledH = selected.Height * scaleY;
+
+                        return ApplyFaceBoxPadding(scaledX, scaledY, scaledW, scaledH, image.Width, image.Height);
                     }
                 }
             }
@@ -273,12 +356,10 @@ namespace EDSC.Desktop.Services
 
             try
             {
-                // Crop face region with some padding
-                int padding = 20;
-                int cropX = Math.Max(0, (int)faceBox.x - padding);
-                int cropY = Math.Max(0, (int)faceBox.y - padding);
-                int cropWidth = Math.Min(image.Width - cropX, (int)faceBox.width + 2 * padding);
-                int cropHeight = Math.Min(image.Height - cropY, (int)faceBox.height + 2 * padding);
+                int cropX = Math.Max(0, (int)MathF.Floor(faceBox.x));
+                int cropY = Math.Max(0, (int)MathF.Floor(faceBox.y));
+                int cropWidth = Math.Min(image.Width - cropX, (int)MathF.Ceiling(faceBox.width));
+                int cropHeight = Math.Min(image.Height - cropY, (int)MathF.Ceiling(faceBox.height));
 
                 if (cropWidth <= 0 || cropHeight <= 0)
                 {
@@ -299,7 +380,7 @@ namespace EDSC.Desktop.Services
                             var pixel = resized[x, y];
                             // Convert RGB to grayscale using standard weights: 0.299*R + 0.587*G + 0.114*B
                             float gray = (0.299f * pixel.R + 0.587f * pixel.G + 0.114f * pixel.B) / 255.0f;
-                            tensor[0, 0, y, x] = gray;
+                            tensor[0, 0, y, x] = (gray - LandmarkMean) / LandmarkStd;
                         }
                     }
 
@@ -347,6 +428,141 @@ namespace EDSC.Desktop.Services
             }
 
             return null;
+        }
+
+        private void GeneratePriors()
+        {
+            _priors.Clear();
+
+            int inputW = FaceDetectionWidth;
+            int inputH = FaceDetectionHeight;
+
+            int featureMap2W = ((inputW + 1) / 2) / 2;
+            int featureMap2H = ((inputH + 1) / 2) / 2;
+            int featureMap3W = featureMap2W / 2;
+            int featureMap3H = featureMap2H / 2;
+            int featureMap4W = featureMap3W / 2;
+            int featureMap4H = featureMap3H / 2;
+            int featureMap5W = featureMap4W / 2;
+            int featureMap5H = featureMap4H / 2;
+            int featureMap6W = featureMap5W / 2;
+            int featureMap6H = featureMap5H / 2;
+
+            var featureMapSizes = new (int Width, int Height)[]
+            {
+                (featureMap3W, featureMap3H),
+                (featureMap4W, featureMap4H),
+                (featureMap5W, featureMap5H),
+                (featureMap6W, featureMap6H)
+            };
+
+            var minSizes = new[]
+            {
+                new[] { 10.0f, 16.0f, 24.0f },
+                new[] { 32.0f, 48.0f },
+                new[] { 64.0f, 96.0f },
+                new[] { 128.0f, 192.0f, 256.0f }
+            };
+
+            int[] steps = { 8, 16, 32, 64 };
+
+            for (int i = 0; i < featureMapSizes.Length; i++)
+            {
+                var size = featureMapSizes[i];
+                var step = steps[i];
+                var mins = minSizes[i];
+
+                for (int h = 0; h < size.Height; h++)
+                {
+                    for (int w = 0; w < size.Width; w++)
+                    {
+                        for (int j = 0; j < mins.Length; j++)
+                        {
+                            float sKx = mins[j] / inputW;
+                            float sKy = mins[j] / inputH;
+                            float cx = (w + 0.5f) * step / inputW;
+                            float cy = (h + 0.5f) * step / inputH;
+
+                            _priors.Add(new Prior(cx, cy, sKx, sKy));
+                        }
+                    }
+                }
+            }
+        }
+
+        private static List<FaceCandidate> ApplyNms(List<FaceCandidate> candidates, float scoreThreshold, float nmsThreshold, int topK)
+        {
+            var sorted = candidates
+                .Where(c => c.Score >= scoreThreshold)
+                .OrderByDescending(c => c.Score)
+                .ToList();
+
+            if (topK > 0 && sorted.Count > topK)
+            {
+                sorted = sorted.Take(topK).ToList();
+            }
+
+            var kept = new List<FaceCandidate>(sorted.Count);
+            foreach (var candidate in sorted)
+            {
+                bool suppressed = false;
+                foreach (var existing in kept)
+                {
+                    if (ComputeIoU(candidate, existing) >= nmsThreshold)
+                    {
+                        suppressed = true;
+                        break;
+                    }
+                }
+
+                if (!suppressed)
+                {
+                    kept.Add(candidate);
+                }
+            }
+
+            return kept;
+        }
+
+        private static float ComputeIoU(FaceCandidate a, FaceCandidate b)
+        {
+            float x1 = MathF.Max(a.X, b.X);
+            float y1 = MathF.Max(a.Y, b.Y);
+            float x2 = MathF.Min(a.X + a.Width, b.X + b.Width);
+            float y2 = MathF.Min(a.Y + a.Height, b.Y + b.Height);
+
+            float interW = MathF.Max(0f, x2 - x1);
+            float interH = MathF.Max(0f, y2 - y1);
+            float interArea = interW * interH;
+            float union = a.Width * a.Height + b.Width * b.Height - interArea;
+
+            if (union <= 0f)
+            {
+                return 0f;
+            }
+
+            return interArea / union;
+        }
+
+        private static (float x, float y, float width, float height) ApplyFaceBoxPadding(
+            float x,
+            float y,
+            float width,
+            float height,
+            int imageWidth,
+            int imageHeight)
+        {
+            float cropX1 = x - width * 0.1f;
+            float cropY1 = y - height * 0.1f;
+            float cropX2 = x + width + width * 0.1f;
+            float cropY2 = y + height + height * 0.1f;
+
+            cropX1 = MathF.Max(0f, cropX1);
+            cropY1 = MathF.Max(0f, cropY1);
+            cropX2 = MathF.Min(imageWidth, cropX2);
+            cropY2 = MathF.Min(imageHeight, cropY2);
+
+            return (cropX1, cropY1, MathF.Max(0f, cropX2 - cropX1), MathF.Max(0f, cropY2 - cropY1));
         }
 
         private HeadPose? CalculateHeadPose(Vector2[] landmarks, int imageWidth, int imageHeight)
