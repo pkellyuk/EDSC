@@ -32,6 +32,9 @@ namespace EDSC.Desktop
         private ICommandServer? _commandServer;
         private IKeyboardService? _keyboardService;
         private ServerConfig? _serverConfig;
+        private CertificateService? _certificateService;
+        private FaceTrackingService? _faceTrackingService;
+        private OpentrackUdpSender? _opentrackSender;
 
         public override async void OnFrameworkInitializationCompleted()
         {
@@ -39,6 +42,16 @@ namespace EDSC.Desktop
 
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
+                // Check for command-line arguments for elevated certificate installation
+                var args = desktop.Args;
+                if (args != null && args.Length > 0 && args[0] == "--install-certificate")
+                {
+                    Debug.WriteLine("[DesktopApp] Running in elevated mode for certificate installation");
+                    await HandleElevatedCertificateInstallationAsync(args);
+                    Environment.Exit(0);
+                    return;
+                }
+
                 try
                 {
                     // Load configuration
@@ -63,30 +76,69 @@ namespace EDSC.Desktop
 
                     var connectionViewModel = new ConnectionViewModel();
 
+                    // Initialize certificate service
+                    _certificateService = new CertificateService();
+                    var certStatus = _certificateService.GetCertificateStatus();
+                    connectionViewModel.CertificateStatus = GetCertificateStatusText(certStatus);
+                    Debug.WriteLine($"[DesktopApp] Certificate service initialized - Status: {certStatus}");
+
+                    // Wire up certificate installation command
+                    connectionViewModel.InstallCertificateCommand = new RelayCommand(
+                        async () => await InstallCertificateAsync(connectionViewModel, localIps.ToArray()),
+                        () => true
+                    );
+
+                    // Wire up URL open command
+                    connectionViewModel.OpenUrlCommand = new RelayCommand(
+                        async () => await Task.Run(() => OpenUrlInBrowser(connectionViewModel.QrCodeUrl)),
+                        () => true
+                    );
+
                     // Initialize face tracking service
-                    FaceTrackingService? faceTrackingService = null;
-                    OpentrackUdpSender? opentrackSender = null;
                     try
                     {
-                        faceTrackingService = new FaceTrackingService();
+                        _faceTrackingService = new FaceTrackingService();
                         var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
-                        await faceTrackingService.InitializeAsync(modelsPath);
-                        await BindTrackingSensitivityAsync(connectionViewModel, faceTrackingService, configService);
+                        await _faceTrackingService.InitializeAsync(modelsPath);
+                        await BindTrackingSensitivityAsync(connectionViewModel, _faceTrackingService, configService);
 
                         // Initialize Opentrack UDP sender
-                        opentrackSender = new OpentrackUdpSender();
-                        opentrackSender.Connect("127.0.0.1", 4242);
+                        _opentrackSender = new OpentrackUdpSender();
+                        _opentrackSender.Connect("127.0.0.1", 4242);
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[DesktopApp] Failed to initialize face tracking: {ex.Message}");
                         Console.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
-                                                faceTrackingService = null;
-                        opentrackSender = null;
+                        _faceTrackingService = null;
+                        _opentrackSender = null;
                     }
 
-                    // Initialize HTTP command server
-                    _commandServer = new HttpCommandServer(_keyboardService, configService, faceTrackingService, opentrackSender);
+                    // Check for existing certificate
+                    string? certPath = null;
+                    string? certPassword = null;
+
+                    if (_certificateService != null)
+                    {
+                        var existingCertStatus = _certificateService.GetCertificateStatus();
+                        if (existingCertStatus == CertificateStatus.InstalledAndValid ||
+                            existingCertStatus == CertificateStatus.GeneratedNotInstalled)
+                        {
+                            certPath = _certificateService.GetCertificatePath();
+                            certPassword = "edsc-local-cert";
+                            Debug.WriteLine($"[DesktopApp] Using existing certificate: {certPath}");
+                        }
+                    }
+
+                    // Initialize HTTP command server with certificate
+                    _commandServer = new HttpCommandServer(
+                        _keyboardService,
+                        configService,
+                        _faceTrackingService,
+                        _opentrackSender,
+                        certPath,
+                        certPassword
+                    );
                     Debug.WriteLine("[DesktopApp] Command server initialized");
 
                     HeadPose? lastPose = null;
@@ -608,6 +660,407 @@ namespace EDSC.Desktop
             {
                 Debug.WriteLine("[DesktopApp] Exit: LoadConfigurationAsync");
             }
+        }
+
+        private async Task InstallCertificateAsync(ConnectionViewModel viewModel, string[] localIpAddresses)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: InstallCertificateAsync");
+
+            if (viewModel == null)
+            {
+                Debug.WriteLine("[DesktopApp] ViewModel is null");
+                Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                return;
+            }
+
+            if (_certificateService == null)
+            {
+                Debug.WriteLine("[DesktopApp] CertificateService is null");
+                viewModel.StatusMessage = "Certificate service not initialized";
+                Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                return;
+            }
+
+            if (localIpAddresses == null || localIpAddresses.Length == 0)
+            {
+                Debug.WriteLine("[DesktopApp] localIpAddresses is null or empty");
+                localIpAddresses = new[] { "127.0.0.1", "localhost" };
+            }
+
+            try
+            {
+                // Check if we're running as admin
+                var isAdmin = _certificateService.IsRunningAsAdmin();
+                Debug.WriteLine($"[DesktopApp] Running as admin: {isAdmin}");
+
+                if (!isAdmin)
+                {
+                    Debug.WriteLine("[DesktopApp] Not running as admin, requesting elevation");
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        viewModel.StatusMessage = "Requesting administrator privileges...";
+                        viewModel.CertificateStatus = "Requesting elevation...";
+                    });
+
+                    // Request elevation - this will show UAC prompt
+                    var elevated = await Task.Run(() => _certificateService.RequestElevatedInstallation(localIpAddresses));
+
+                    if (!elevated)
+                    {
+                        Debug.WriteLine("[DesktopApp] Elevation request failed or cancelled");
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            viewModel.StatusMessage = "Administrator privileges required. Please accept UAC prompt.";
+                            viewModel.CertificateStatus = "Not installed - elevation required";
+                        });
+                        Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                        return;
+                    }
+
+                    Debug.WriteLine("[DesktopApp] Elevated process completed, checking status");
+
+                    // Check if certificate was installed
+                    var status = _certificateService.GetCertificateStatus();
+                    var statusText = GetCertificateStatusText(status);
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        viewModel.CertificateStatus = statusText;
+
+                        if (status == CertificateStatus.InstalledAndValid)
+                        {
+                            viewModel.StatusMessage = "SSL certificate installed successfully! Restarting server...";
+                        }
+                        else
+                        {
+                            viewModel.StatusMessage = "Certificate installation may have failed. Check status.";
+                        }
+                    });
+
+                    // Restart server with new certificate if successful
+                    if (status == CertificateStatus.InstalledAndValid || status == CertificateStatus.GeneratedNotInstalled)
+                    {
+                        var certPath = _certificateService.GetCertificatePath();
+                        await RestartServerWithCertificateAsync(certPath);
+
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            viewModel.StatusMessage = "SSL certificate active - HTTPS connections secured";
+                        });
+                    }
+
+                    Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                    return;
+                }
+
+                // If we're already running as admin, install directly
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    viewModel.StatusMessage = "Generating SSL certificate...";
+                    viewModel.CertificateStatus = "Generating...";
+                });
+
+                Debug.WriteLine("[DesktopApp] Generating certificate (already elevated)");
+
+                var result = await _certificateService.GenerateAndInstallCertificateAsync(localIpAddresses);
+
+                if (result == null)
+                {
+                    Debug.WriteLine("[DesktopApp] Certificate generation returned null result");
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        viewModel.StatusMessage = "Certificate generation failed";
+                        viewModel.CertificateStatus = "Error";
+                    });
+                    Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                    return;
+                }
+
+                if (!result.Success)
+                {
+                    Debug.WriteLine($"[DesktopApp] Certificate installation failed: {result.Message}");
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        viewModel.StatusMessage = $"Certificate installation failed: {result.Message}";
+                        viewModel.CertificateStatus = "Error";
+                    });
+
+                    Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+                    return;
+                }
+
+                Debug.WriteLine("[DesktopApp] Certificate installed successfully");
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    viewModel.StatusMessage = "SSL certificate installed successfully! Restarting server...";
+                    viewModel.CertificateStatus = "Installed and Active";
+                });
+
+                // Restart server with new certificate
+                await RestartServerWithCertificateAsync(result.CertificatePath);
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    viewModel.StatusMessage = "SSL certificate active - HTTPS connections secured";
+                });
+
+                Debug.WriteLine("[DesktopApp] Certificate installation complete");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error installing certificate: {ex.Message}");
+                Debug.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    viewModel.StatusMessage = $"Error: {ex.Message}";
+                    viewModel.CertificateStatus = "Error";
+                });
+            }
+
+            Debug.WriteLine("[DesktopApp] Exit: InstallCertificateAsync");
+        }
+
+        private async Task RestartServerWithCertificateAsync(string certPath)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: RestartServerWithCertificateAsync");
+
+            if (string.IsNullOrEmpty(certPath))
+            {
+                Debug.WriteLine("[DesktopApp] Certificate path is null or empty");
+                Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+                return;
+            }
+
+            if (_commandServer == null)
+            {
+                Debug.WriteLine("[DesktopApp] Command server is null");
+                Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+                return;
+            }
+
+            if (_keyboardService == null)
+            {
+                Debug.WriteLine("[DesktopApp] Keyboard service is null");
+                Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+                return;
+            }
+
+            if (_serverConfig == null)
+            {
+                Debug.WriteLine("[DesktopApp] Server config is null");
+                Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+                return;
+            }
+
+            try
+            {
+                Debug.WriteLine("[DesktopApp] Stopping existing server");
+
+                // Stop existing server
+                if (_commandServer.IsRunning)
+                {
+                    await _commandServer.StopAsync();
+                }
+
+                Debug.WriteLine("[DesktopApp] Creating new server with certificate");
+
+                // Create new server with certificate
+                var configService = new JsonConfigurationService();
+                _commandServer = new HttpCommandServer(
+                    _keyboardService,
+                    configService,
+                    _faceTrackingService,
+                    _opentrackSender,
+                    certPath,
+                    "edsc-local-cert"
+                );
+
+                var localIps = GetLocalIpAddresses();
+                var selectedIp = localIps.FirstOrDefault() ?? "127.0.0.1";
+
+                Debug.WriteLine($"[DesktopApp] Starting server on {selectedIp}:{_serverConfig.Port}");
+                await _commandServer.StartAsync(_serverConfig.Port, selectedIp);
+
+                Debug.WriteLine("[DesktopApp] Server restarted successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error restarting server: {ex.Message}");
+                Debug.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
+            }
+
+            Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+        }
+
+        private static string GetCertificateStatusText(CertificateStatus status)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: GetCertificateStatusText");
+
+            string result;
+
+            switch (status)
+            {
+                case CertificateStatus.NotGenerated:
+                    result = "Not installed - click to install";
+                    break;
+                case CertificateStatus.GeneratedNotInstalled:
+                    result = "Generated but not installed in system";
+                    break;
+                case CertificateStatus.InstalledAndValid:
+                    result = "Installed and active";
+                    break;
+                case CertificateStatus.InstalledButExpired:
+                    result = "Expired - needs renewal";
+                    break;
+                case CertificateStatus.Error:
+                    result = "Error checking status";
+                    break;
+                default:
+                    result = "Unknown status";
+                    break;
+            }
+
+            Debug.WriteLine($"[DesktopApp] Status text: {result}");
+            Debug.WriteLine("[DesktopApp] Exit: GetCertificateStatusText");
+
+            return result;
+        }
+
+        private async Task HandleElevatedCertificateInstallationAsync(string[] args)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: HandleElevatedCertificateInstallationAsync");
+
+            if (args == null || args.Length < 2)
+            {
+                Debug.WriteLine("[DesktopApp] No IP addresses provided in arguments");
+                Debug.WriteLine("[DesktopApp] Exit: HandleElevatedCertificateInstallationAsync");
+                return;
+            }
+
+            try
+            {
+                // Extract IP addresses from arguments (skip the first argument which is "--install-certificate")
+                var localIpAddresses = args.Skip(1).ToArray();
+                Debug.WriteLine($"[DesktopApp] IP addresses for certificate: {string.Join(", ", localIpAddresses)}");
+
+                _certificateService = new CertificateService();
+
+                Debug.WriteLine("[DesktopApp] Generating and installing certificate");
+                var result = await _certificateService.GenerateAndInstallCertificateAsync(localIpAddresses);
+
+                if (result == null)
+                {
+                    Debug.WriteLine("[DesktopApp] Certificate generation returned null");
+                    Debug.WriteLine("[DesktopApp] Exit: HandleElevatedCertificateInstallationAsync");
+                    return;
+                }
+
+                if (result.Success)
+                {
+                    Debug.WriteLine($"[DesktopApp] Certificate installed successfully: {result.Message}");
+                }
+                else
+                {
+                    Debug.WriteLine($"[DesktopApp] Certificate installation failed: {result.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error in elevated certificate installation: {ex.Message}");
+                Debug.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
+            }
+
+            Debug.WriteLine("[DesktopApp] Exit: HandleElevatedCertificateInstallationAsync");
+        }
+
+        private static void OpenUrlInBrowser(string url)
+        {
+            Debug.WriteLine("[DesktopApp] Entry: OpenUrlInBrowser");
+
+            if (string.IsNullOrEmpty(url))
+            {
+                Debug.WriteLine("[DesktopApp] URL is null or empty");
+                Debug.WriteLine("[DesktopApp] Exit: OpenUrlInBrowser");
+                return;
+            }
+
+            try
+            {
+                Debug.WriteLine($"[DesktopApp] Opening URL: {url}");
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                };
+
+                Process.Start(startInfo);
+
+                Debug.WriteLine("[DesktopApp] URL opened successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error opening URL: {ex.Message}");
+                Debug.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
+            }
+
+            Debug.WriteLine("[DesktopApp] Exit: OpenUrlInBrowser");
+        }
+    }
+
+    /// <summary>
+    /// Simple relay command for parameterless async actions
+    /// </summary>
+    public class RelayCommand : System.Windows.Input.ICommand
+    {
+        private readonly Func<Task> _executeAsync;
+        private readonly Func<bool> _canExecute;
+
+        public event EventHandler? CanExecuteChanged;
+
+        public RelayCommand(Func<Task> executeAsync, Func<bool> canExecute)
+        {
+            if (executeAsync == null)
+            {
+                throw new ArgumentNullException(nameof(executeAsync));
+            }
+
+            _executeAsync = executeAsync;
+            _canExecute = canExecute ?? (() => true);
+        }
+
+        public bool CanExecute(object? parameter)
+        {
+            if (_canExecute == null)
+            {
+                return true;
+            }
+
+            return _canExecute();
+        }
+
+        public async void Execute(object? parameter)
+        {
+            if (_executeAsync == null)
+            {
+                return;
+            }
+
+            await _executeAsync();
+        }
+
+        public void RaiseCanExecuteChanged()
+        {
+            if (CanExecuteChanged == null)
+            {
+                return;
+            }
+
+            CanExecuteChanged.Invoke(this, EventArgs.Empty);
         }
     }
 }

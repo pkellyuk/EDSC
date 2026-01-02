@@ -84,11 +84,60 @@
                            Stretch="Uniform"
                            HorizontalAlignment="Center"
                            Margin="0,5"/>
-                    <TextBlock Text="{Binding QrCodeUrl}"
-                              FontSize="10"
-                              Foreground="#D1D5DB"
-                              TextWrapping="Wrap"
-                              TextAlignment="Center"/>
+                    <Button Content="{Binding QrCodeUrl}"
+                            Command="{Binding OpenUrlCommand}"
+                            HorizontalAlignment="Center"
+                            Padding="0"
+                            Margin="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Cursor="Hand">
+                        <Button.Styles>
+                            <Style Selector="Button:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                            <Style Selector="Button:pressed /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                        </Button.Styles>
+                        <Button.Template>
+                            <ControlTemplate>
+                                <TextBlock Text="{Binding QrCodeUrl}"
+                                          FontSize="10"
+                                          Foreground="#60A5FA"
+                                          TextWrapping="Wrap"
+                                          TextAlignment="Center"
+                                          TextDecorations="Underline"
+                                          Cursor="Hand"/>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- SSL Certificate Section -->
+                    <Border Background="#1E293B"
+                            Padding="8"
+                            CornerRadius="5"
+                            Margin="0,10,0,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="SSL Certificate"
+                                      FontWeight="Bold"
+                                      FontSize="11"
+                                      Foreground="#F9FAFB"/>
+                            <TextBlock Text="{Binding CertificateStatus}"
+                                      FontSize="10"
+                                      Foreground="#9CA3AF"
+                                      TextWrapping="Wrap"/>
+                            <Button Content="Install SSL Certificate"
+                                    Command="{Binding InstallCertificateCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="8,6"
+                                    FontSize="11"
+                                    Background="#10B981"
+                                    Foreground="White"
+                                    CornerRadius="4"
+                                    Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

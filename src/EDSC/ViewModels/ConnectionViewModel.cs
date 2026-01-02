@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Windows.Input;
 using Avalonia.Media.Imaging;
 
 namespace EDSC.ViewModels
@@ -29,6 +30,13 @@ namespace EDSC.ViewModels
         private double _rotationScale;
         private double _rollScale;
         private double _smoothingStrength;
+
+        // Certificate properties
+        private string _certificateStatus;
+        private ICommand? _installCertificateCommand;
+
+        // URL command
+        private ICommand? _openUrlCommand;
 
         public string StatusMessage
         {
@@ -327,6 +335,64 @@ namespace EDSC.ViewModels
             }
         }
 
+        public string CertificateStatus
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_certificateStatus))
+                {
+                    return "Not Installed";
+                }
+                return _certificateStatus;
+            }
+            set
+            {
+                if (_certificateStatus == value)
+                {
+                    return;
+                }
+
+                _certificateStatus = value;
+                OnPropertyChanged(nameof(CertificateStatus));
+            }
+        }
+
+        public ICommand? InstallCertificateCommand
+        {
+            get
+            {
+                return _installCertificateCommand;
+            }
+            set
+            {
+                if (_installCertificateCommand == value)
+                {
+                    return;
+                }
+
+                _installCertificateCommand = value;
+                OnPropertyChanged(nameof(InstallCertificateCommand));
+            }
+        }
+
+        public ICommand? OpenUrlCommand
+        {
+            get
+            {
+                return _openUrlCommand;
+            }
+            set
+            {
+                if (_openUrlCommand == value)
+                {
+                    return;
+                }
+
+                _openUrlCommand = value;
+                OnPropertyChanged(nameof(OpenUrlCommand));
+            }
+        }
+
         public ConnectionViewModel()
         {
             Debug.WriteLine("[ConnectionVM] Entry: Constructor");
@@ -348,6 +414,13 @@ namespace EDSC.ViewModels
             _rotationScale = 1.0;
             _rollScale = 1.0;
             _smoothingStrength = 0.35;
+
+            // Initialize certificate properties
+            _certificateStatus = "Not Installed";
+            _installCertificateCommand = null;
+
+            // Initialize URL command
+            _openUrlCommand = null;
 
             Debug.WriteLine("[ConnectionVM] Exit: Constructor");
         }

@@ -38,6 +38,10 @@ namespace EDSC.Desktop.Services
         private readonly IFaceTrackingService? _faceTrackingService;
         private readonly OpentrackUdpSender? _opentrackSender;
 
+        // SSL Certificate
+        private readonly string? _certificatePath;
+        private readonly string? _certificatePassword;
+
         public bool IsRunning { get; private set; }
 
         /// <summary>
@@ -54,7 +58,9 @@ namespace EDSC.Desktop.Services
             IKeyboardService keyboardService,
             IConfigurationService configService,
             IFaceTrackingService? faceTrackingService = null,
-            OpentrackUdpSender? opentrackSender = null)
+            OpentrackUdpSender? opentrackSender = null,
+            string? certificatePath = null,
+            string? certificatePassword = null)
         {
             Debug.WriteLine("[HttpCommandServer] Entry: Constructor");
 
@@ -72,9 +78,12 @@ namespace EDSC.Desktop.Services
             _configService = configService;
             _faceTrackingService = faceTrackingService;
             _opentrackSender = opentrackSender;
+            _certificatePath = certificatePath;
+            _certificatePassword = certificatePassword;
 
             Debug.WriteLine($"[HttpCommandServer] Face tracking enabled: {_faceTrackingService != null}");
             Debug.WriteLine($"[HttpCommandServer] Opentrack enabled: {_opentrackSender != null}");
+            Debug.WriteLine($"[HttpCommandServer] Custom certificate: {!string.IsNullOrEmpty(_certificatePath)}");
             Debug.WriteLine("[HttpCommandServer] Exit: Constructor");
         }
 
@@ -109,7 +118,16 @@ namespace EDSC.Desktop.Services
                                 {
                                     options.Listen(ip, httpsPort, listenOptions =>
                                     {
-                                        listenOptions.UseHttps();
+                                        if (!string.IsNullOrEmpty(_certificatePath) && File.Exists(_certificatePath))
+                                        {
+                                            Debug.WriteLine($"[HttpCommandServer] Using custom certificate: {_certificatePath}");
+                                            listenOptions.UseHttps(_certificatePath, _certificatePassword);
+                                        }
+                                        else
+                                        {
+                                            Debug.WriteLine("[HttpCommandServer] Using default dev certificate");
+                                            listenOptions.UseHttps();
+                                        }
                                     });
                                     Debug.WriteLine($"[HttpCommandServer] HTTPS enabled on port {httpsPort}");
                                 }
@@ -126,7 +144,14 @@ namespace EDSC.Desktop.Services
                                     {
                                         options.Listen(System.Net.IPAddress.Loopback, httpsPort, listenOptions =>
                                         {
-                                            listenOptions.UseHttps();
+                                            if (!string.IsNullOrEmpty(_certificatePath) && File.Exists(_certificatePath))
+                                            {
+                                                listenOptions.UseHttps(_certificatePath, _certificatePassword);
+                                            }
+                                            else
+                                            {
+                                                listenOptions.UseHttps();
+                                            }
                                         });
                                     }
                                     catch
@@ -142,7 +167,16 @@ namespace EDSC.Desktop.Services
                                 {
                                     options.ListenAnyIP(httpsPort, listenOptions =>
                                     {
-                                        listenOptions.UseHttps();
+                                        if (!string.IsNullOrEmpty(_certificatePath) && File.Exists(_certificatePath))
+                                        {
+                                            Debug.WriteLine($"[HttpCommandServer] Using custom certificate: {_certificatePath}");
+                                            listenOptions.UseHttps(_certificatePath, _certificatePassword);
+                                        }
+                                        else
+                                        {
+                                            Debug.WriteLine("[HttpCommandServer] Using default dev certificate");
+                                            listenOptions.UseHttps();
+                                        }
                                     });
                                     Debug.WriteLine($"[HttpCommandServer] HTTPS enabled on port {httpsPort}");
                                 }
