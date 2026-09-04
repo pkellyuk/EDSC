@@ -1,6 +1,7 @@
 using EDSC.Services;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace EDSC.Desktop.Services
@@ -22,6 +23,13 @@ namespace EDSC.Desktop.Services
         private bool _centerPending;
         private HeadPose? _center;
         private double _smoothingStrength = 0.5;
+
+        // Centring waits for the user to settle (they are often still holding the phone when tracking
+        // starts) and then averages a short window rather than trusting a single pose.
+        private const double CentreSettleSeconds = 3.0;
+        private const double CentreAverageSeconds = 1.0;
+        private double _centreRequestedAt = -1.0;
+        private readonly System.Collections.Generic.List<HeadPose> _centreSamples = new System.Collections.Generic.List<HeadPose>();
 
         // Opentrack normally filters the pose; in direct mode this filter takes that job.
         // One filter per axis: X, Y, Z, Yaw, Pitch, Roll.
@@ -144,6 +152,8 @@ namespace EDSC.Desktop.Services
                     {
                         _freeTrackSender.Open();
                         _centerPending = true;
+                        _centreRequestedAt = -1.0;
+                        _centreSamples.Clear();
                         _center = null;
                     }
                     else
@@ -168,9 +178,12 @@ namespace EDSC.Desktop.Services
                 {
                     if (_directOutputEnabled)
                     {
-                        return _center == null
-                            ? $"{_freeTrackSender.Status}. Look straight ahead; first pose sets the centre."
-                            : _freeTrackSender.Status;
+                        if (_centerPending || _center == null)
+                        {
+                            return $"{_freeTrackSender.Status}. Centring: sit normally and look straight ahead for a few seconds.";
+                        }
+
+                        return _freeTrackSender.Status;
                     }
 
                     return _udpSender != null && _udpSender.IsConnected
@@ -188,6 +201,8 @@ namespace EDSC.Desktop.Services
             lock (_lock)
             {
                 _centerPending = true;
+                _centreRequestedAt = -1.0;
+                _centreSamples.Clear();
                 ResetFilters();
             }
         }
@@ -201,6 +216,7 @@ namespace EDSC.Desktop.Services
 
             bool direct;
             HeadPose? center;
+            double now = _clock.Elapsed.TotalSeconds;
 
             lock (_lock)
             {
@@ -208,17 +224,42 @@ namespace EDSC.Desktop.Services
 
                 if (direct && (_centerPending || _center == null))
                 {
-                    _center = new HeadPose
+                    if (_centreRequestedAt < 0)
                     {
-                        X = pose.X,
-                        Y = pose.Y,
-                        Z = pose.Z,
-                        Yaw = pose.Yaw,
-                        Pitch = pose.Pitch,
-                        Roll = pose.Roll
-                    };
-                    _centerPending = false;
-                    Debug.WriteLine($"[PoseOutputRouter] Centre captured: {_center}");
+                        _centreRequestedAt = now;
+                        _centreSamples.Clear();
+                    }
+
+                    double elapsed = now - _centreRequestedAt;
+
+                    if (elapsed >= CentreSettleSeconds)
+                    {
+                        _centreSamples.Add(pose);
+                    }
+
+                    if (elapsed >= CentreSettleSeconds + CentreAverageSeconds && _centreSamples.Count > 0)
+                    {
+                        _center = new HeadPose
+                        {
+                            X = _centreSamples.Average(p => p.X),
+                            Y = _centreSamples.Average(p => p.Y),
+                            Z = _centreSamples.Average(p => p.Z),
+                            Yaw = _centreSamples.Average(p => p.Yaw),
+                            Pitch = _centreSamples.Average(p => p.Pitch),
+                            Roll = _centreSamples.Average(p => p.Roll)
+                        };
+                        Debug.WriteLine($"[PoseOutputRouter] Centre captured from {_centreSamples.Count} samples: {_center}");
+                        _centerPending = false;
+                        _centreRequestedAt = -1.0;
+                        _centreSamples.Clear();
+                        ResetFilters();
+                    }
+                    else
+                    {
+                        // Hold the game at neutral until the centre is known
+                        _freeTrackSender.WritePose(0, 0, 0, 0, 0, 0);
+                        return;
+                    }
                 }
 
                 center = _center;

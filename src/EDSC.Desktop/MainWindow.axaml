@@ -10,6 +10,7 @@
         MinWidth="980"
         MinHeight="640"
         Title="EDSC"
+        Icon="/Assets/edsc.ico"
         WindowStartupLocation="CenterScreen">
     <TabControl Padding="0">
         <TabItem Header="Tracking">

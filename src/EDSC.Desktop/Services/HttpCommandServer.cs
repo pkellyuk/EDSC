@@ -1596,10 +1596,14 @@ namespace EDSC.Desktop.Services
         sendPhonePreview(video, w, h);
 
         if (readout) {
+          // Nose tip position in the frame: if this stays near 50% while you move sideways,
+          // the phone camera is auto-framing (Samsung 'Video call effects') and hiding the movement.
+          const nose = faces[0][1];
+          const noseText = nose ? ('nose in frame ' + Math.round(nose.x * 100) + '%, ' + Math.round(nose.y * 100) + '%') : '';
           readout.textContent =
             'yaw ' + pose.yaw.toFixed(1).padStart(6) + '°   pitch ' + pose.pitch.toFixed(1).padStart(6) + '°   roll ' + pose.roll.toFixed(1).padStart(6) + '°\n' +
             'x   ' + pose.x.toFixed(1).padStart(6) + 'cm  y     ' + pose.y.toFixed(1).padStart(6) + 'cm  z    ' + pose.z.toFixed(1).padStart(6) + 'cm\n' +
-            'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + '  ' + w + 'x' + h;
+            'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + '  ' + w + 'x' + h + '   ' + noseText;
         }
         setTrackingStatus('Tracking on phone');
       } else {

@@ -14,6 +14,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using WindowsInput.Native;
 using Avalonia.Media.Imaging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -129,21 +130,42 @@ namespace EDSC.Desktop
                         () => true
                     );
 
-                    if (_faceTrackingService != null)
-                    {
-                        await BindTrackingSensitivityAsync(connectionViewModel, _faceTrackingService, _poseRouter, configService);
-                    }
-
-                    connectionViewModel.DirectOutputStatus = _poseRouter.Status;
-
-                    // "=" re-centres the view from anywhere, including while the game has focus.
-                    // Installed here because this runs on the UI thread, which pumps messages for the hook.
+                    // Re-centre hotkey ("=" by default, changeable) works from anywhere, including while the
+                    // game has focus. Installed here because this runs on the UI thread, which pumps messages
+                    // for the hook. Created before the config binding so the saved key can be applied to it.
                     _centerHotkey = new GlobalHotkeyService();
                     if (!_centerHotkey.Start(GlobalHotkeyService.VkOemPlus, () => _poseRouter?.Center()))
                     {
                         Debug.WriteLine("[DesktopApp] Centre hotkey could not be installed");
                         _centerHotkey = null;
                     }
+
+                    connectionViewModel.ChangeCenterHotkeyCommand = new RelayCommand(
+                        () =>
+                        {
+                            BeginHotkeyCapture(connectionViewModel);
+                            return Task.CompletedTask;
+                        },
+                        () => true
+                    );
+
+                    connectionViewModel.ResetTrackingCommand = new RelayCommand(
+                        () =>
+                        {
+                            // Each property change flows through the normal apply-and-save path
+                            ApplyTrackingConfigToViewModel(new TrackingConfig(), connectionViewModel);
+                            connectionViewModel.StatusMessage = "Tracking settings reset to defaults";
+                            return Task.CompletedTask;
+                        },
+                        () => true
+                    );
+
+                    if (_faceTrackingService != null)
+                    {
+                        await BindTrackingSensitivityAsync(connectionViewModel, _faceTrackingService, _poseRouter, configService);
+                    }
+
+                    connectionViewModel.DirectOutputStatus = _poseRouter.Status;
 
                     // Check for existing certificate
                     string? certPath = null;
@@ -348,7 +370,71 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.RollScale)
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
                 || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
-                || propertyName == nameof(ConnectionViewModel.ShowPcPreview);
+                || propertyName == nameof(ConnectionViewModel.ShowPcPreview)
+                || propertyName == nameof(ConnectionViewModel.CenterHotkey);
+        }
+
+        /// <summary>
+        /// Turn a stored key name (OEM_PLUS, F12, NUMPAD0, or a VK_ prefixed name) into a virtual key code.
+        /// </summary>
+        private static int ParseHotkey(string? name)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                if (Enum.TryParse<VirtualKeyCode>(name.Trim(), true, out var direct))
+                {
+                    return (int)direct;
+                }
+
+                if (Enum.TryParse<VirtualKeyCode>("VK_" + name.Trim().ToUpperInvariant(), true, out var prefixed))
+                {
+                    return (int)prefixed;
+                }
+            }
+
+            return GlobalHotkeyService.VkOemPlus;
+        }
+
+        private void BeginHotkeyCapture(ConnectionViewModel viewModel)
+        {
+            if (viewModel == null)
+            {
+                return;
+            }
+
+            if (_centerHotkey == null)
+            {
+                viewModel.StatusMessage = "The keyboard hook is not available, so the hotkey cannot be changed.";
+                return;
+            }
+
+            if (viewModel.IsCapturingHotkey)
+            {
+                _centerHotkey.CancelCapture();
+                viewModel.IsCapturingHotkey = false;
+                return;
+            }
+
+            viewModel.IsCapturingHotkey = true;
+            viewModel.StatusMessage = "Press the key you want to use for re-centring. Escape cancels.";
+
+            _centerHotkey.CaptureNextKey(captured =>
+            {
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    viewModel.IsCapturingHotkey = false;
+
+                    if (!captured.HasValue)
+                    {
+                        viewModel.StatusMessage = "Hotkey change cancelled.";
+                        return;
+                    }
+
+                    // Saved through the normal tracking-settings path
+                    viewModel.CenterHotkey = ((VirtualKeyCode)captured.Value).ToString();
+                    viewModel.StatusMessage = $"Re-centre hotkey is now '{GlobalHotkeyService.DescribeKey(captured.Value)}'.";
+                });
+            });
         }
 
         private static void ApplyTrackingConfigToViewModel(TrackingConfig config, ConnectionViewModel viewModel)
@@ -360,6 +446,7 @@ namespace EDSC.Desktop
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
             viewModel.DirectOutputEnabled = config.DirectOutput;
             viewModel.ShowPcPreview = config.ShowPreview;
+            viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
         }
 
         private void ApplyTrackingConfigToService(
@@ -371,6 +458,13 @@ namespace EDSC.Desktop
             {
                 httpServer.PreviewEnabled = viewModel.ShowPcPreview;
             }
+
+            var hotkey = ParseHotkey(viewModel.CenterHotkey);
+            if (_centerHotkey != null)
+            {
+                _centerHotkey.VirtualKey = hotkey;
+            }
+            viewModel.CenterHotkeyDisplay = GlobalHotkeyService.DescribeKey(hotkey);
 
             if (!viewModel.ShowPcPreview && viewModel.HasVideoFrame)
             {
@@ -405,6 +499,7 @@ namespace EDSC.Desktop
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
             config.Tracking.ShowPreview = viewModel.ShowPcPreview;
+            config.Tracking.CenterHotkey = viewModel.CenterHotkey;
         }
 
         private static double ClampTranslationScale(double value)

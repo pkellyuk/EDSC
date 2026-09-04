@@ -199,6 +199,16 @@
                                   TextWrapping="Wrap"/>
                     </CheckBox>
 
+                    <Button Content="Reset tracking settings to defaults"
+                            Command="{Binding ResetTrackingCommand}"
+                            HorizontalAlignment="Stretch"
+                            Padding="8,6"
+                            FontSize="11"
+                            Background="#374151"
+                            Foreground="White"
+                            CornerRadius="4"
+                            Margin="0,6,0,0"/>
+
                     <!-- Pose Output -->
                     <Border Background="#1E293B"
                             Padding="8"
@@ -219,16 +229,27 @@
                                       FontSize="10"
                                       Foreground="#9CA3AF"
                                       TextWrapping="Wrap"/>
-                            <Button Content="Center view  (hotkey: = )"
-                                    Command="{Binding CenterCommand}"
-                                    IsEnabled="{Binding DirectOutputEnabled}"
-                                    HorizontalAlignment="Stretch"
-                                    Padding="8,6"
-                                    FontSize="11"
-                                    Background="#2563EB"
-                                    Foreground="White"
-                                    CornerRadius="4"
-                                    Margin="0,4,0,0"/>
+                            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                                <Button Grid.Column="0"
+                                        Content="{Binding CenterButtonText}"
+                                        Command="{Binding CenterCommand}"
+                                        IsEnabled="{Binding DirectOutputEnabled}"
+                                        HorizontalAlignment="Stretch"
+                                        Padding="8,6"
+                                        FontSize="11"
+                                        Background="#2563EB"
+                                        Foreground="White"
+                                        CornerRadius="4"/>
+                                <Button Grid.Column="1"
+                                        Content="{Binding ChangeHotkeyButtonText}"
+                                        Command="{Binding ChangeCenterHotkeyCommand}"
+                                        Padding="8,6"
+                                        FontSize="11"
+                                        Background="#374151"
+                                        Foreground="White"
+                                        CornerRadius="4"
+                                        Margin="6,0,0,0"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

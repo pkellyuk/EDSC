@@ -33,5 +33,11 @@ namespace EDSC.Models
         /// </summary>
         [JsonPropertyName("showPreview")]
         public bool ShowPreview { get; set; } = true;
+
+        /// <summary>
+        /// Windows virtual key name for the re-centre hotkey (e.g. OEM_PLUS for "=", F12, NUMPAD0).
+        /// </summary>
+        [JsonPropertyName("centerHotkey")]
+        public string CenterHotkey { get; set; } = "OEM_PLUS";
     }
 }

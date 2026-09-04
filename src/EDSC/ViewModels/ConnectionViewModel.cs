@@ -38,6 +38,11 @@ namespace EDSC.ViewModels
         private bool _directOutputEnabled;
         private string _directOutputStatus;
         private ICommand? _centerCommand;
+        private ICommand? _changeCenterHotkeyCommand;
+        private ICommand? _resetTrackingCommand;
+        private string _centerHotkey = "OEM_PLUS";
+        private string _centerHotkeyDisplay = "=";
+        private bool _isCapturingHotkey;
 
         // Certificate properties
         private string _certificateStatus;
@@ -448,6 +453,123 @@ namespace EDSC.ViewModels
             }
         }
 
+        public ICommand? ChangeCenterHotkeyCommand
+        {
+            get
+            {
+                return _changeCenterHotkeyCommand;
+            }
+            set
+            {
+                if (_changeCenterHotkeyCommand == value)
+                {
+                    return;
+                }
+
+                _changeCenterHotkeyCommand = value;
+                OnPropertyChanged(nameof(ChangeCenterHotkeyCommand));
+            }
+        }
+
+        public ICommand? ResetTrackingCommand
+        {
+            get
+            {
+                return _resetTrackingCommand;
+            }
+            set
+            {
+                if (_resetTrackingCommand == value)
+                {
+                    return;
+                }
+
+                _resetTrackingCommand = value;
+                OnPropertyChanged(nameof(ResetTrackingCommand));
+            }
+        }
+
+        /// <summary>
+        /// Virtual key name of the re-centre hotkey, as stored in config.
+        /// </summary>
+        public string CenterHotkey
+        {
+            get
+            {
+                return string.IsNullOrEmpty(_centerHotkey) ? "OEM_PLUS" : _centerHotkey;
+            }
+            set
+            {
+                var next = string.IsNullOrWhiteSpace(value) ? "OEM_PLUS" : value.Trim();
+                if (_centerHotkey == next)
+                {
+                    return;
+                }
+
+                _centerHotkey = next;
+                OnPropertyChanged(nameof(CenterHotkey));
+                OnPropertyChanged(nameof(CenterButtonText));
+            }
+        }
+
+        /// <summary>
+        /// Friendly name of the hotkey for the current keyboard layout, set by the desktop app.
+        /// </summary>
+        public string CenterHotkeyDisplay
+        {
+            get
+            {
+                return string.IsNullOrEmpty(_centerHotkeyDisplay) ? CenterHotkey : _centerHotkeyDisplay;
+            }
+            set
+            {
+                if (_centerHotkeyDisplay == value)
+                {
+                    return;
+                }
+
+                _centerHotkeyDisplay = value ?? string.Empty;
+                OnPropertyChanged(nameof(CenterHotkeyDisplay));
+                OnPropertyChanged(nameof(CenterButtonText));
+            }
+        }
+
+        public bool IsCapturingHotkey
+        {
+            get
+            {
+                return _isCapturingHotkey;
+            }
+            set
+            {
+                if (_isCapturingHotkey == value)
+                {
+                    return;
+                }
+
+                _isCapturingHotkey = value;
+                OnPropertyChanged(nameof(IsCapturingHotkey));
+                OnPropertyChanged(nameof(CenterButtonText));
+                OnPropertyChanged(nameof(ChangeHotkeyButtonText));
+            }
+        }
+
+        public string CenterButtonText
+        {
+            get
+            {
+                return $"Center view  (hotkey: {CenterHotkeyDisplay})";
+            }
+        }
+
+        public string ChangeHotkeyButtonText
+        {
+            get
+            {
+                return IsCapturingHotkey ? "Press a key... (Esc cancels)" : "Change key";
+            }
+        }
+
         public string CertificateStatus
         {
             get
@@ -532,6 +654,10 @@ namespace EDSC.ViewModels
             _directOutputEnabled = false;
             _directOutputStatus = string.Empty;
             _centerCommand = null;
+            _changeCenterHotkeyCommand = null;
+            _centerHotkey = "OEM_PLUS";
+            _centerHotkeyDisplay = "=";
+            _isCapturingHotkey = false;
 
             // Initialize certificate properties
             _certificateStatus = "Not Installed";
