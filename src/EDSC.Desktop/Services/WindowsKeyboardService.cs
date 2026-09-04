@@ -355,7 +355,10 @@ namespace EDSC.Desktop.Services
         {
             try
             {
-                var logPath = Path.Combine(AppContext.BaseDirectory, LogFileName);
+                // AppData rather than the install folder, which is read-only under Program Files
+                var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EDSC");
+                Directory.CreateDirectory(logDir);
+                var logPath = Path.Combine(logDir, LogFileName);
                 var line = $"{DateTime.UtcNow:O} {message}{Environment.NewLine}";
                 lock (LogLock)
                 {

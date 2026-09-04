@@ -7,6 +7,12 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <DefineConstants>DESKTOP</DefineConstants>
     <ApplicationIcon>Assets\edsc.ico</ApplicationIcon>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Product>EDSC</Product>
+    <Company>EDSC</Company>
+    <Description>Elite Dangerous Ship Controls</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,7 +41,8 @@
     <Content Include="Assets\Icons\*.svg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Models\*.onnx">
+    <!-- Only the two models the tracker loads; the other landmark models in the folder are a different family -->
+    <Content Include="Models\detection.onnx;Models\lm_fast_exp1.onnx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

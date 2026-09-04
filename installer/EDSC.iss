@@ -1,6 +1,6 @@
 ; Inno Setup script for EDSC (EXE installer)
 #define AppName "EDSC"
-#define AppVersion "1.4.0"
+#define AppVersion "2.0.0"
 #define AppPublisher "EDSC"
 #define AppExeName "EDSC.Desktop.exe"
 #define PublishDir "..\\src\\EDSC.Desktop\\bin\\Release\\net8.0-windows\\win-x64\\publish"
@@ -14,10 +14,12 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=EDSC-Setup
+OutputBaseFilename=EDSCv2-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequiredOverridesAllowed=dialog
 SetupIconFile=..\src\EDSC.Desktop\Assets\edsc.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 

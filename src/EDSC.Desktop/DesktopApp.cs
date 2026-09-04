@@ -745,7 +745,8 @@ namespace EDSC.Desktop
 
             try
             {
-                var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+                // Same location the configuration service uses (AppData, migrated from the install folder)
+                var configPath = new JsonConfigurationService().GetConfigurationPath();
 
                 if (!File.Exists(configPath))
                 {

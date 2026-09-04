@@ -19,7 +19,26 @@ namespace EDSC.Services
         {
             Debug.WriteLine("[JsonConfigurationService] Entry: Constructor");
 
-            _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CONFIG_FILENAME);
+            // Per-user AppData: the install folder is read-only under Program Files.
+            // A config.json left next to the executable by an older version is migrated once.
+            var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "EDSC");
+            _configPath = Path.Combine(appData, CONFIG_FILENAME);
+
+            try
+            {
+                Directory.CreateDirectory(appData);
+
+                var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CONFIG_FILENAME);
+                if (!File.Exists(_configPath) && File.Exists(legacyPath))
+                {
+                    File.Copy(legacyPath, _configPath);
+                    Debug.WriteLine($"[JsonConfigurationService] Migrated config from {legacyPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[JsonConfigurationService] Could not prepare config folder: {ex.Message}");
+            }
 
             Debug.WriteLine($"[JsonConfigurationService] Config path: {_configPath}");
             Debug.WriteLine("[JsonConfigurationService] Exit: Constructor");

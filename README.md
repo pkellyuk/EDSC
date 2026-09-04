@@ -29,6 +29,8 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 
 ## Quick Start
 
+Not building from source? Grab `EDSCv2-Setup.exe` from the [Releases page](https://github.com/pkellyuk/EDSC/releases) and skip to step 2.
+
 ### 1) Build and run the desktop app
 
 ```bash
@@ -120,7 +122,7 @@ The app generates a self-signed certificate. Click **Install SSL Certificate** t
 
 ## Configuration
 
-`config.json` lives next to the executable. On first run it is created with a default layout. Each button looks like:
+`config.json` lives in `%APPDATA%\EDSC`. On first run it is created with a default layout, or migrated from a copy next to the executable left by an older version. Each button looks like:
 
 ```json
 {
@@ -196,7 +198,11 @@ dotnet publish src/EDSC.Desktop/EDSC.Desktop.csproj -c Release -r win-x64 --self
 iscc installer/EDSC.iss
 ```
 
-The output is `installer/EDSC-Setup.exe`.
+The output is `installer/EDSCv2-Setup.exe`. Inno Setup 6 is needed (`winget install JRSoftware.InnoSetup`). Releases are published on the GitHub Releases page.
+
+## Installing a release
+
+Download `EDSCv2-Setup.exe` from the latest GitHub release and run it. Windows SmartScreen may warn because the installer is not code-signed; choose "More info" then "Run anyway". The installer offers a per-user or all-users install and creates a desktop shortcut.
 
 ## Security Considerations
 

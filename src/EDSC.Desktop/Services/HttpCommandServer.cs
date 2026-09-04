@@ -245,7 +245,7 @@ namespace EDSC.Desktop.Services
                                         {
                                             service = "EDSC",
                                             status = "running",
-                                            version = "1.2.0"
+                                            version = typeof(HttpCommandServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"
                                         });
                                     await context.Response.WriteAsync(healthJson);
                                 }
