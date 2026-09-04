@@ -20,6 +20,12 @@ namespace EDSC.Models
         public double RollScale { get; set; } = 1.0;
 
         [JsonPropertyName("smoothingStrength")]
-        public double SmoothingStrength { get; set; } = 0.35;
+        public double SmoothingStrength { get; set; } = 0.5;
+
+        /// <summary>
+        /// True to write pose straight into the game's TrackIR/FreeTrack interface instead of sending to Opentrack.
+        /// </summary>
+        [JsonPropertyName("directOutput")]
+        public bool DirectOutput { get; set; } = false;
     }
 }

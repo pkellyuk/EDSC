@@ -31,6 +31,18 @@ namespace EDSC.Desktop.Services
         private readonly double[] _prevTvec = new double[3];
         private bool _hasPrevPnpSolution;
 
+        // Landmark-driven tracking: crop the next frame around the previous landmarks instead of re-detecting.
+        // The detector is frontal-biased and drops out at moderate head angles; the landmark model does not.
+        private (float x, float y, float width, float height)? _trackedFaceBox;
+        private int _framesSinceDetection;
+        private const int DetectorVerifyInterval = 15;   // frames between detector sanity checks while tracking
+        private const float DetectorReseedIoU = 0.3f;    // below this overlap the detector's box wins
+
+        /// <summary>
+        /// Human-readable result of the most recent frame, for the preview status line.
+        /// </summary>
+        public string LastStatus { get; private set; } = "Idle";
+
         // Model input sizes
         private const int FaceDetectionWidth = 160;
         private const int FaceDetectionHeight = 120;
@@ -45,7 +57,7 @@ namespace EDSC.Desktop.Services
         private const float BaseTranslationScale = 0.1f; // model units (mm) -> cm for Opentrack
 
         // Reject a PnP solution whose reprojection error exceeds this fraction of the eye-corner distance
-        private const double MaxReprojectionErrorRatio = 0.2;
+        private const double MaxReprojectionErrorRatio = 0.3;
 
         // 3D face model points in millimetres, camera convention: X right, Y down, Z away from camera.
         // A frontal face facing the camera therefore has identity rotation.
@@ -106,7 +118,7 @@ namespace EDSC.Desktop.Services
 
         public float RollScale { get; set; } = 1f;
 
-        public float SmoothingStrength { get; set; } = 0.35f;
+        public float SmoothingStrength { get; set; } = 0.5f;
 
         public async Task InitializeAsync(string modelsPath)
         {
@@ -167,58 +179,261 @@ namespace EDSC.Desktop.Services
                 // Load image from bytes
                 using (var image = Image.Load<Rgb24>(frameData))
                 {
-                    // Step 1: Detect face
-                    var faceBox = await DetectFaceAsync(image);
-                    if (faceBox == null)
+                    (float x, float y, float width, float height)? trackedBox;
+                    int framesSinceDetection;
+                    lock (_smoothingLock)
                     {
-                        ResetSmoothing();
-                        return null;
+                        trackedBox = _trackedFaceBox;
+                        framesSinceDetection = _framesSinceDetection;
                     }
 
-                    // Step 2: Detect landmarks
-                    var landmarks = await DetectLandmarksAsync(image, faceBox.Value);
-                    if (landmarks == null || landmarks.Length != 66)
-                    {
-                        ResetSmoothing();
-                        return null;
-                    }
+                    Vector2[]? landmarks = null;
+                    HeadPose? pose = null;
+                    (float x, float y, float width, float height) usedBox = default;
+                    string status = string.Empty;
+                    string source = "roi";
 
-                    // Step 3: Calculate head pose from landmarks
-                    var pose = CalculateHeadPose(landmarks, image.Width, image.Height);
-
-                    if (pose != null)
+                    // Fast path: crop around the previous frame's landmarks and skip the detector
+                    if (trackedBox != null)
                     {
-                        // Add visualization data
-                        pose.FaceBox = new FaceBox
+                        landmarks = await DetectLandmarksAsync(image, trackedBox.Value);
+                        if (landmarks == null || landmarks.Length != 66)
                         {
-                            X = faceBox.Value.x,
-                            Y = faceBox.Value.y,
-                            Width = faceBox.Value.width,
-                            Height = faceBox.Value.height
-                        };
-
-                        pose.Landmarks = landmarks.Select(lm => new LandmarkPoint
+                            status = "landmark model returned no result";
+                        }
+                        else if (!LandmarksFitCrop(landmarks, trackedBox.Value))
                         {
-                            X = lm.X,
-                            Y = lm.Y
-                        }).ToArray();
-
-                        pose = ApplySmoothing(pose);
+                            status = "landmarks left the crop";
+                        }
+                        else
+                        {
+                            pose = CalculateHeadPose(landmarks, image.Width, image.Height, out status);
+                            usedBox = trackedBox.Value;
+                        }
                     }
-                    else
+
+                    // Run the detector when tracking failed, or periodically as a sanity check
+                    (float x, float y, float width, float height)? detected = null;
+                    bool detectorRan = false;
+                    if (pose == null || framesSinceDetection >= DetectorVerifyInterval)
                     {
-                        ResetSmoothing();
+                        detected = await DetectFaceAsync(image);
+                        detectorRan = true;
                     }
 
-                    return pose;
+                    // While tracking, a detector hit somewhere else means the crop has drifted: re-seed from it
+                    if (pose != null && detected != null && BoxIoU(detected.Value, usedBox) < DetectorReseedIoU)
+                    {
+                        pose = null;
+                        status = "detector disagreed with tracked crop";
+                    }
+
+                    if (pose == null)
+                    {
+                        source = "detector";
+
+                        if (detected == null)
+                        {
+                            ResetSmoothing();
+                            LastStatus = trackedBox != null
+                                ? $"Face lost: {status}; detector found nothing"
+                                : "No face detected";
+                            return null;
+                        }
+
+                        landmarks = await DetectLandmarksAsync(image, detected.Value);
+                        if (landmarks == null || landmarks.Length != 66)
+                        {
+                            ResetSmoothing();
+                            LastStatus = "Landmark model returned no result";
+                            return null;
+                        }
+
+                        pose = CalculateHeadPose(landmarks, image.Width, image.Height, out status);
+                        usedBox = detected.Value;
+
+                        if (pose == null)
+                        {
+                            ResetSmoothing();
+                            LastStatus = status;
+                            return null;
+                        }
+                    }
+
+                    // Add visualization data
+                    pose.FaceBox = new FaceBox
+                    {
+                        X = usedBox.x,
+                        Y = usedBox.y,
+                        Width = usedBox.width,
+                        Height = usedBox.height
+                    };
+
+                    pose.Landmarks = landmarks!.Select(lm => new LandmarkPoint
+                    {
+                        X = lm.X,
+                        Y = lm.Y
+                    }).ToArray();
+
+                    // Crop for the next frame follows the landmarks we just found, but eased so the
+                    // crop does not jump every frame and feed its own jitter back into the landmarks
+                    var nextBox = BuildTrackingBox(landmarks!, image.Width, image.Height);
+                    lock (_smoothingLock)
+                    {
+                        _trackedFaceBox = source == "roi" ? EaseTrackingBox(_trackedFaceBox, nextBox) : nextBox;
+                        _framesSinceDetection = detectorRan ? 0 : framesSinceDetection + 1;
+                    }
+
+                    LastStatus = $"Tracking via {source}: {status}";
+
+                    return ApplySmoothing(pose);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FaceTrackingService] Error processing frame: {ex.Message}");
                 ResetSmoothing();
+                LastStatus = $"Error: {ex.Message}";
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Build the crop for the next frame from this frame's landmarks. The landmark cloud spans
+        /// eyebrows to chin, so extra room is added above for the forehead to approximate the
+        /// detector's box plus its padding, which is what the landmark model was trained on.
+        /// </summary>
+        private static (float x, float y, float width, float height)? BuildTrackingBox(Vector2[] landmarks, int imageWidth, int imageHeight)
+        {
+            if (landmarks == null || landmarks.Length == 0)
+            {
+                return null;
+            }
+
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            foreach (var lm in landmarks)
+            {
+                if (lm.X < minX) minX = lm.X;
+                if (lm.Y < minY) minY = lm.Y;
+                if (lm.X > maxX) maxX = lm.X;
+                if (lm.Y > maxY) maxY = lm.Y;
+            }
+
+            float w = maxX - minX;
+            float h = maxY - minY;
+            if (w < 16f || h < 16f)
+            {
+                return null;
+            }
+
+            float x1 = MathF.Max(0f, minX - w * 0.15f);
+            float x2 = MathF.Min(imageWidth, maxX + w * 0.15f);
+            float y1 = MathF.Max(0f, minY - h * 0.30f);
+            float y2 = MathF.Min(imageHeight, maxY + h * 0.10f);
+
+            float outW = x2 - x1;
+            float outH = y2 - y1;
+            if (outW < 24f || outH < 24f)
+            {
+                return null;
+            }
+
+            return (x1, y1, outW, outH);
+        }
+
+        /// <summary>
+        /// Move the tracked crop part of the way toward the newly computed one. A large jump
+        /// (the face moved quickly) is taken in full so the crop never lags behind the face.
+        /// </summary>
+        private static (float x, float y, float width, float height)? EaseTrackingBox(
+            (float x, float y, float width, float height)? previous,
+            (float x, float y, float width, float height)? target)
+        {
+            if (target == null)
+            {
+                return null;
+            }
+
+            if (previous == null)
+            {
+                return target;
+            }
+
+            var p = previous.Value;
+            var n = target.Value;
+
+            float prevCx = p.x + p.width / 2f;
+            float prevCy = p.y + p.height / 2f;
+            float nextCx = n.x + n.width / 2f;
+            float nextCy = n.y + n.height / 2f;
+            float shift = MathF.Sqrt((nextCx - prevCx) * (nextCx - prevCx) + (nextCy - prevCy) * (nextCy - prevCy));
+
+            if (shift > n.width * 0.15f || MathF.Abs(n.width - p.width) > n.width * 0.2f)
+            {
+                return target;
+            }
+
+            const float alpha = 0.3f;
+            return (
+                p.x + (n.x - p.x) * alpha,
+                p.y + (n.y - p.y) * alpha,
+                p.width + (n.width - p.width) * alpha,
+                p.height + (n.height - p.height) * alpha);
+        }
+
+        /// <summary>
+        /// Reject landmark sets that are implausible for the crop they came from, which is what the
+        /// landmark model produces when the face has moved out of the tracked region.
+        /// </summary>
+        private static bool LandmarksFitCrop(Vector2[] landmarks, (float x, float y, float width, float height) crop)
+        {
+            if (landmarks == null || landmarks.Length == 0 || crop.width <= 0f || crop.height <= 0f)
+            {
+                return false;
+            }
+
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            foreach (var lm in landmarks)
+            {
+                if (float.IsNaN(lm.X) || float.IsNaN(lm.Y))
+                {
+                    return false;
+                }
+
+                if (lm.X < minX) minX = lm.X;
+                if (lm.Y < minY) minY = lm.Y;
+                if (lm.X > maxX) maxX = lm.X;
+                if (lm.Y > maxY) maxY = lm.Y;
+            }
+
+            float w = maxX - minX;
+            float h = maxY - minY;
+            float relW = w / crop.width;
+            float relH = h / crop.height;
+
+            if (relW < 0.25f || relW > 1.25f || relH < 0.25f || relH > 1.25f)
+            {
+                return false;
+            }
+
+            float centerX = (minX + maxX) / 2f;
+            float centerY = (minY + maxY) / 2f;
+            return centerX >= crop.x && centerX <= crop.x + crop.width
+                && centerY >= crop.y && centerY <= crop.y + crop.height;
+        }
+
+        private static float BoxIoU(
+            (float x, float y, float width, float height) a,
+            (float x, float y, float width, float height) b)
+        {
+            float x1 = MathF.Max(a.x, b.x);
+            float y1 = MathF.Max(a.y, b.y);
+            float x2 = MathF.Min(a.x + a.width, b.x + b.width);
+            float y2 = MathF.Min(a.y + a.height, b.y + b.height);
+
+            float inter = MathF.Max(0f, x2 - x1) * MathF.Max(0f, y2 - y1);
+            float union = a.width * a.height + b.width * b.height - inter;
+            return union <= 0f ? 0f : inter / union;
         }
 
         private async Task<(float x, float y, float width, float height)?> DetectFaceAsync(Image<Rgb24> image)
@@ -581,8 +796,10 @@ namespace EDSC.Desktop.Services
             return (cropX1, cropY1, MathF.Max(0f, cropX2 - cropX1), MathF.Max(0f, cropY2 - cropY1));
         }
 
-        private HeadPose? CalculateHeadPose(Vector2[] landmarks, int imageWidth, int imageHeight)
+        private HeadPose? CalculateHeadPose(Vector2[] landmarks, int imageWidth, int imageHeight, out string status)
         {
+            status = "pose not computed";
+
             try
             {
                 // Extract the key landmarks we need
@@ -600,6 +817,7 @@ namespace EDSC.Desktop.Services
                 double eyeDistancePx = Vector2.Distance(image2DPoints[2], image2DPoints[3]);
                 if (eyeDistancePx < 1.0)
                 {
+                    status = "eye corners coincide";
                     return null;
                 }
 
@@ -607,7 +825,7 @@ namespace EDSC.Desktop.Services
 
                 var rvec = new double[3];
                 var tvec = new double[3];
-                double rms;
+                double rms = double.PositiveInfinity;
                 bool solved = false;
 
                 // First try: refine from the previous frame's solution
@@ -659,8 +877,11 @@ namespace EDSC.Desktop.Services
 
                 if (!solved)
                 {
+                    status = $"pose rejected (rms {rms:F1}px > {maxRms:F1}px)";
                     return null;
                 }
+
+                status = $"rms {rms:F1}px";
 
                 // Decompose R = Ry(yaw) * Rx(pitch) * Rz(roll) in the X-right, Y-down, Z-forward frame.
                 // Signs are chosen so that: yaw > 0 when the face turns toward image-right,
@@ -688,6 +909,7 @@ namespace EDSC.Desktop.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[FaceTrackingService] Pose calculation error: {ex.Message}");
+                status = $"pose error: {ex.Message}";
                 return null;
             }
         }
@@ -698,6 +920,8 @@ namespace EDSC.Desktop.Services
             {
                 _lastSmoothedPose = null;
                 _hasPrevPnpSolution = false;
+                _trackedFaceBox = null;
+                _framesSinceDetection = 0;
             }
         }
 

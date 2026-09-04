@@ -310,6 +310,39 @@
                                       Foreground="#10B981"
                                       VerticalAlignment="Center"/>
                         </Grid>
+
+                        <!-- Pose Output -->
+                        <Border Background="#1E293B"
+                                Padding="8"
+                                CornerRadius="5"
+                                Margin="0,8,0,0">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Pose Output"
+                                          FontWeight="Bold"
+                                          FontSize="12"
+                                          Foreground="#F9FAFB"/>
+                                <CheckBox IsChecked="{Binding DirectOutputEnabled}"
+                                          FontSize="11"
+                                          Foreground="#E5E7EB">
+                                    <TextBlock Text="Send directly to game (bypass Opentrack)"
+                                              TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <TextBlock Text="{Binding DirectOutputStatus}"
+                                          FontSize="10"
+                                          Foreground="#9CA3AF"
+                                          TextWrapping="Wrap"/>
+                                <Button Content="Center view  (hotkey: = )"
+                                        Command="{Binding CenterCommand}"
+                                        IsEnabled="{Binding DirectOutputEnabled}"
+                                        HorizontalAlignment="Stretch"
+                                        Padding="8,6"
+                                        FontSize="11"
+                                        Background="#2563EB"
+                                        Foreground="White"
+                                        CornerRadius="4"
+                                        Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Grid>
             </Border>

@@ -38,7 +38,7 @@ namespace EDSC.Desktop.Services
 
         // Face tracking
         private readonly IFaceTrackingService? _faceTrackingService;
-        private readonly OpentrackUdpSender? _opentrackSender;
+        private readonly PoseOutputRouter? _poseOutput;
 
         // SSL Certificate
         private readonly string? _certificatePath;
@@ -56,11 +56,16 @@ namespace EDSC.Desktop.Services
         /// </summary>
         public event EventHandler<HeadPose>? PoseDetected;
 
+        /// <summary>
+        /// Event fired when a frame was processed but no pose could be produced
+        /// </summary>
+        public event EventHandler? PoseLost;
+
         public HttpCommandServer(
             IKeyboardService keyboardService,
             IConfigurationService configService,
             IFaceTrackingService? faceTrackingService = null,
-            OpentrackUdpSender? opentrackSender = null,
+            PoseOutputRouter? poseOutput = null,
             string? certificatePath = null,
             string? certificatePassword = null)
         {
@@ -79,12 +84,12 @@ namespace EDSC.Desktop.Services
             _keyboardService = keyboardService;
             _configService = configService;
             _faceTrackingService = faceTrackingService;
-            _opentrackSender = opentrackSender;
+            _poseOutput = poseOutput;
             _certificatePath = certificatePath;
             _certificatePassword = certificatePassword;
 
             Debug.WriteLine($"[HttpCommandServer] Face tracking enabled: {_faceTrackingService != null}");
-            Debug.WriteLine($"[HttpCommandServer] Opentrack enabled: {_opentrackSender != null}");
+            Debug.WriteLine($"[HttpCommandServer] Pose output enabled: {_poseOutput != null}");
             Debug.WriteLine($"[HttpCommandServer] Custom certificate: {!string.IsNullOrEmpty(_certificatePath)}");
             Debug.WriteLine("[HttpCommandServer] Exit: Constructor");
         }
@@ -1521,14 +1526,15 @@ namespace EDSC.Desktop.Services
                     var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
                     if (pose == null)
                     {
+                        PoseLost?.Invoke(this, EventArgs.Empty);
                         continue;
                     }
 
                     PoseDetected?.Invoke(this, pose);
 
-                    if (_opentrackSender != null && _opentrackSender.IsConnected)
+                    if (_poseOutput != null)
                     {
-                        await _opentrackSender.SendPoseAsync(pose);
+                        await _poseOutput.SendPoseAsync(pose);
                     }
                 }
                 catch (Exception ex)

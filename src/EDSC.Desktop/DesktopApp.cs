@@ -35,6 +35,10 @@ namespace EDSC.Desktop
         private CertificateService? _certificateService;
         private FaceTrackingService? _faceTrackingService;
         private OpentrackUdpSender? _opentrackSender;
+        private PoseOutputRouter? _poseRouter;
+        private GlobalHotkeyService? _centerHotkey;
+        private ConnectionViewModel? _connectionViewModel;
+        private HeadPose? _lastPose;
 
         public override async void OnFrameworkInitializationCompleted()
         {
@@ -100,7 +104,6 @@ namespace EDSC.Desktop
                         _faceTrackingService = new FaceTrackingService();
                         var modelsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
                         await _faceTrackingService.InitializeAsync(modelsPath);
-                        await BindTrackingSensitivityAsync(connectionViewModel, _faceTrackingService, configService);
 
                         // Initialize Opentrack UDP sender
                         _opentrackSender = new OpentrackUdpSender();
@@ -112,6 +115,33 @@ namespace EDSC.Desktop
                         Console.WriteLine($"[DesktopApp] Stack trace: {ex.StackTrace}");
                         _faceTrackingService = null;
                         _opentrackSender = null;
+                    }
+
+                    // Pose output: Opentrack over UDP by default, or straight into the game's TrackIR interface
+                    _poseRouter = new PoseOutputRouter(_opentrackSender);
+                    connectionViewModel.CenterCommand = new RelayCommand(
+                        () =>
+                        {
+                            _poseRouter?.Center();
+                            return Task.CompletedTask;
+                        },
+                        () => true
+                    );
+
+                    if (_faceTrackingService != null)
+                    {
+                        await BindTrackingSensitivityAsync(connectionViewModel, _faceTrackingService, _poseRouter, configService);
+                    }
+
+                    connectionViewModel.DirectOutputStatus = _poseRouter.Status;
+
+                    // "=" re-centres the view from anywhere, including while the game has focus.
+                    // Installed here because this runs on the UI thread, which pumps messages for the hook.
+                    _centerHotkey = new GlobalHotkeyService();
+                    if (!_centerHotkey.Start(GlobalHotkeyService.VkOemPlus, () => _poseRouter?.Center()))
+                    {
+                        Debug.WriteLine("[DesktopApp] Centre hotkey could not be installed");
+                        _centerHotkey = null;
                     }
 
                     // Check for existing certificate
@@ -135,63 +165,14 @@ namespace EDSC.Desktop
                         _keyboardService,
                         configService,
                         _faceTrackingService,
-                        _opentrackSender,
+                        _poseRouter,
                         certPath,
                         certPassword
                     );
                     Debug.WriteLine("[DesktopApp] Command server initialized");
 
-                    HeadPose? lastPose = null;
-
-                    // Wire up video frame handler
-                    if (_commandServer is HttpCommandServer httpServer)
-                    {
-                        // Wire up pose detection to capture detection data
-                        httpServer.PoseDetected += (sender, pose) =>
-                        {
-                            lastPose = pose;
-                        };
-
-                        httpServer.FrameReceived += (sender, frameData) =>
-                        {
-                            try
-                            {
-                                // Convert byte array to Bitmap on UI thread with overlays
-                                Dispatcher.UIThread.InvokeAsync(() =>
-                                {
-                                    try
-                                    {
-                                        Bitmap bitmap;
-
-                                        // Draw overlays if face was detected
-                                        if (lastPose != null && lastPose.FaceBox != null)
-                                        {
-                                            bitmap = DrawOverlays(frameData, lastPose);
-                                        }
-                                        else
-                                        {
-                                            using (var ms = new MemoryStream(frameData))
-                                            {
-                                                bitmap = new Bitmap(ms);
-                                            }
-                                        }
-
-                                        var fps = httpServer.GetCurrentFps();
-                                        connectionViewModel.UpdateVideoFrame(bitmap, fps);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Debug.WriteLine($"[DesktopApp] Error updating video frame: {ex.Message}");
-                                    }
-                                });
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[DesktopApp] Error in FrameReceived handler: {ex.Message}");
-                            }
-                        };
-                        Debug.WriteLine("[DesktopApp] Video frame handler wired up");
-                    }
+                    _connectionViewModel = connectionViewModel;
+                    WireServerEvents(_commandServer);
 
                     // Start HTTP server
                     if (_serverConfig.AutoStart)
@@ -251,7 +232,11 @@ namespace EDSC.Desktop
                     Debug.WriteLine("[DesktopApp] HTTP command server stopped");
                 }
 
-                // Cleanup
+                // Cleanup (releases FreeTrack shared memory and stops the dummy TrackIR process)
+                _centerHotkey?.Dispose();
+                _centerHotkey = null;
+                _poseRouter?.Dispose();
+                _poseRouter = null;
                 _keyboardService = null;
                 _commandServer = null;
             }
@@ -291,9 +276,10 @@ namespace EDSC.Desktop
         private static async Task BindTrackingSensitivityAsync(
             ConnectionViewModel viewModel,
             FaceTrackingService faceTrackingService,
+            PoseOutputRouter poseRouter,
             IConfigurationService configService)
         {
-            if (viewModel == null || faceTrackingService == null || configService == null)
+            if (viewModel == null || faceTrackingService == null || poseRouter == null || configService == null)
             {
                 return;
             }
@@ -305,7 +291,7 @@ namespace EDSC.Desktop
             }
 
             ApplyTrackingConfigToViewModel(config.Tracking, viewModel);
-            ApplyTrackingConfigToService(viewModel, faceTrackingService);
+            ApplyTrackingConfigToService(viewModel, faceTrackingService, poseRouter);
 
             CancellationTokenSource? saveCts = null;
 
@@ -321,7 +307,8 @@ namespace EDSC.Desktop
                     return;
                 }
 
-                ApplyTrackingConfigToService(viewModel, faceTrackingService);
+                ApplyTrackingConfigToService(viewModel, faceTrackingService, poseRouter);
+                viewModel.DirectOutputStatus = poseRouter.Status;
 
                 saveCts?.Cancel();
                 var currentCts = new CancellationTokenSource();
@@ -354,7 +341,8 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.YawScale)
                 || propertyName == nameof(ConnectionViewModel.RotationScale)
                 || propertyName == nameof(ConnectionViewModel.RollScale)
-                || propertyName == nameof(ConnectionViewModel.SmoothingStrength);
+                || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
+                || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled);
         }
 
         private static void ApplyTrackingConfigToViewModel(TrackingConfig config, ConnectionViewModel viewModel)
@@ -364,15 +352,21 @@ namespace EDSC.Desktop
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
+            viewModel.DirectOutputEnabled = config.DirectOutput;
         }
 
-        private static void ApplyTrackingConfigToService(ConnectionViewModel viewModel, FaceTrackingService faceTrackingService)
+        private static void ApplyTrackingConfigToService(
+            ConnectionViewModel viewModel,
+            FaceTrackingService faceTrackingService,
+            PoseOutputRouter poseRouter)
         {
             faceTrackingService.TranslationScale = (float)viewModel.TranslationScale;
             faceTrackingService.YawScale = (float)viewModel.YawScale;
             faceTrackingService.RotationScale = (float)viewModel.RotationScale;
             faceTrackingService.RollScale = (float)viewModel.RollScale;
             faceTrackingService.SmoothingStrength = (float)viewModel.SmoothingStrength;
+            poseRouter.SmoothingStrength = viewModel.SmoothingStrength;
+            poseRouter.DirectOutputEnabled = viewModel.DirectOutputEnabled;
         }
 
         private static void UpdateTrackingConfigFromViewModel(AppConfig config, ConnectionViewModel viewModel)
@@ -387,6 +381,7 @@ namespace EDSC.Desktop
             config.Tracking.PitchScale = viewModel.RotationScale;
             config.Tracking.RollScale = viewModel.RollScale;
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
+            config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
         }
 
         private static double ClampTrackingScale(double value)
@@ -874,13 +869,20 @@ namespace EDSC.Desktop
                     _keyboardService,
                     configService,
                     _faceTrackingService,
-                    _opentrackSender,
+                    _poseRouter,
                     certPath,
                     "edsc-local-cert"
                 );
 
-                var localIps = GetLocalIpAddresses();
-                var selectedIp = localIps.FirstOrDefault() ?? "127.0.0.1";
+                // The new instance has no subscribers yet; without this the preview goes dark after a cert install
+                WireServerEvents(_commandServer);
+
+                // Bind to the IP shown in the QR code, not merely the first one found
+                var selectedIp = _connectionViewModel?.SelectedLocalIpAddress;
+                if (string.IsNullOrEmpty(selectedIp))
+                {
+                    selectedIp = GetLocalIpAddresses().FirstOrDefault() ?? "127.0.0.1";
+                }
 
                 Debug.WriteLine($"[DesktopApp] Starting server on {selectedIp}:{_serverConfig.Port}");
                 await _commandServer.StartAsync(_serverConfig.Port, selectedIp);
@@ -894,6 +896,83 @@ namespace EDSC.Desktop
             }
 
             Debug.WriteLine("[DesktopApp] Exit: RestartServerWithCertificateAsync");
+        }
+
+        /// <summary>
+        /// Subscribe the desktop preview to a command server's frame and pose events.
+        /// Must be called for every server instance, including ones created on restart.
+        /// </summary>
+        private void WireServerEvents(ICommandServer? server)
+        {
+            if (server is not HttpCommandServer httpServer)
+            {
+                Debug.WriteLine("[DesktopApp] WireServerEvents: server is not an HttpCommandServer, nothing to wire");
+                return;
+            }
+
+            httpServer.PoseDetected += (sender, pose) =>
+            {
+                _lastPose = pose;
+            };
+
+            // Clear the overlay when tracking drops out so stale landmarks are not drawn over live video
+            httpServer.PoseLost += (sender, args) =>
+            {
+                _lastPose = null;
+            };
+
+            httpServer.FrameReceived += (sender, frameData) =>
+            {
+                try
+                {
+                    // Convert byte array to Bitmap on UI thread with overlays
+                    Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        try
+                        {
+                            var viewModel = _connectionViewModel;
+                            if (viewModel == null)
+                            {
+                                return;
+                            }
+
+                            Bitmap bitmap;
+                            var pose = _lastPose;
+
+                            // Draw overlays if face was detected
+                            if (pose != null && pose.FaceBox != null)
+                            {
+                                bitmap = DrawOverlays(frameData, pose);
+                            }
+                            else
+                            {
+                                using (var ms = new MemoryStream(frameData))
+                                {
+                                    bitmap = new Bitmap(ms);
+                                }
+                            }
+
+                            var fps = httpServer.GetCurrentFps();
+                            viewModel.UpdateVideoFrame(bitmap, fps, _faceTrackingService?.LastStatus);
+
+                            if (_poseRouter != null)
+                            {
+                                viewModel.DirectOutputStatus = _poseRouter.Status;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[DesktopApp] Error updating video frame: {ex.Message}");
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[DesktopApp] Error in FrameReceived handler: {ex.Message}");
+                }
+            };
+
+            Debug.WriteLine("[DesktopApp] Video frame handler wired up");
         }
 
         private static string GetCertificateStatusText(CertificateStatus status)

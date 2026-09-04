@@ -31,6 +31,11 @@ namespace EDSC.ViewModels
         private double _rollScale;
         private double _smoothingStrength;
 
+        // Pose output properties
+        private bool _directOutputEnabled;
+        private string _directOutputStatus;
+        private ICommand? _centerCommand;
+
         // Certificate properties
         private string _certificateStatus;
         private ICommand? _installCertificateCommand;
@@ -335,6 +340,67 @@ namespace EDSC.ViewModels
             }
         }
 
+        /// <summary>
+        /// True to bypass Opentrack and feed the game's TrackIR interface directly.
+        /// </summary>
+        public bool DirectOutputEnabled
+        {
+            get
+            {
+                return _directOutputEnabled;
+            }
+            set
+            {
+                if (_directOutputEnabled == value)
+                {
+                    return;
+                }
+
+                _directOutputEnabled = value;
+                OnPropertyChanged(nameof(DirectOutputEnabled));
+            }
+        }
+
+        public string DirectOutputStatus
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_directOutputStatus))
+                {
+                    return string.Empty;
+                }
+                return _directOutputStatus;
+            }
+            set
+            {
+                if (_directOutputStatus == value)
+                {
+                    return;
+                }
+
+                _directOutputStatus = value;
+                OnPropertyChanged(nameof(DirectOutputStatus));
+            }
+        }
+
+        public ICommand? CenterCommand
+        {
+            get
+            {
+                return _centerCommand;
+            }
+            set
+            {
+                if (_centerCommand == value)
+                {
+                    return;
+                }
+
+                _centerCommand = value;
+                OnPropertyChanged(nameof(CenterCommand));
+            }
+        }
+
         public string CertificateStatus
         {
             get
@@ -413,7 +479,12 @@ namespace EDSC.ViewModels
             _yawScale = 1.0;
             _rotationScale = 1.0;
             _rollScale = 1.0;
-            _smoothingStrength = 0.35;
+            _smoothingStrength = 0.5;
+
+            // Initialize pose output properties
+            _directOutputEnabled = false;
+            _directOutputStatus = string.Empty;
+            _centerCommand = null;
 
             // Initialize certificate properties
             _certificateStatus = "Not Installed";
@@ -462,7 +533,7 @@ namespace EDSC.ViewModels
             }
         }
 
-        public void UpdateVideoFrame(Bitmap? frameImage, double fps)
+        public void UpdateVideoFrame(Bitmap? frameImage, double fps, string? trackingStatus = null)
         {
             VideoFrameImage = frameImage;
             VideoFps = fps.ToString("F1");
@@ -470,7 +541,9 @@ namespace EDSC.ViewModels
             if (frameImage != null)
             {
                 ShowVideoPreview = true;
-                VideoStatusText = "Receiving video stream";
+                VideoStatusText = string.IsNullOrEmpty(trackingStatus)
+                    ? "Receiving video stream"
+                    : trackingStatus;
             }
         }
 
