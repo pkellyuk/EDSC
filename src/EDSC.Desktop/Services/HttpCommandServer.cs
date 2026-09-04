@@ -661,6 +661,135 @@ namespace EDSC.Desktop.Services
     .btn.unbound {
       opacity: 0.4;
     }
+    body.fit-all {
+      overflow: hidden;
+    }
+    body.fit-all header,
+    body.fit-all .status,
+    body.fit-all .tracking-mode,
+    body.fit-all #voiceFeedback,
+    body.fit-all #reload,
+    body.fit-all #voiceBtn {
+      display: none !important;
+    }
+    body.fit-all main {
+      max-width: none;
+      padding: 4px;
+    }
+    body.fit-all .toolbar {
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+    body.fit-all .toolbar button {
+      padding: 5px 9px;
+    }
+    #blades,
+    #bladeNav {
+      display: none;
+    }
+    body.fit-all #blades {
+      display: block;
+    }
+    body.fit-all.blades-mode #bladeNav {
+      display: grid;
+      grid-template-columns: repeat(var(--blade-count, 1), minmax(0, 1fr));
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+    #bladeNav button {
+      min-width: 0;
+      overflow: hidden;
+      padding: 7px 3px 5px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      clip-path: polygon(7px 0, 100% 0, calc(100% - 7px) 100%, 0 100%);
+      color: #fff;
+      font-size: clamp(7px, 2.4vw, 10px);
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #bladeNav button[aria-selected=""true""] {
+      border-bottom-color: #fff;
+      filter: brightness(1.3);
+      transform: translateY(2px);
+    }
+    body.fit-all #trackingPanel {
+      width: min(180px, 48vw);
+      padding: 4px;
+      margin: 0 auto 4px auto;
+      border-radius: 6px;
+    }
+    body.fit-all .tracking-status {
+      margin-bottom: 3px;
+      font-size: 10px;
+    }
+    body.fit-all #videoCanvas,
+    body.fit-all #videoPreview {
+      border-radius: 4px;
+    }
+    body.fit-all .pose-readout {
+      display: none !important;
+    }
+    body.fit-all #grid {
+      display: grid;
+      grid-template-columns: repeat(var(--fit-columns, 4), minmax(0, 1fr));
+      gap: var(--fit-gap, 4px);
+    }
+    body.fit-all #grid > .category,
+    body.fit-all #grid > .category > .grid {
+      display: contents;
+    }
+    body.fit-all #grid > .category > h2 {
+      display: none;
+    }
+    body.fit-all.blades-mode #grid {
+      display: block;
+    }
+    body.fit-all.blades-mode #grid > .category {
+      display: none;
+    }
+    body.fit-all.blades-mode #grid > .category.active-blade {
+      display: block;
+      margin: 0;
+      padding: 8px;
+      border-radius: 4px 4px 10px 10px;
+    }
+    body.fit-all.blades-mode #grid > .category.active-blade > h2 {
+      display: block;
+      margin: 0 0 6px;
+      font-size: 13px;
+    }
+    body.fit-all.blades-mode #grid > .category.active-blade > .grid {
+      display: grid;
+      grid-template-columns: repeat(var(--fit-columns, 3), minmax(0, var(--fit-cell-size, 120px)));
+      gap: var(--fit-gap, 4px);
+      justify-content: center;
+    }
+    body.fit-all .btn {
+      width: 100% !important;
+      height: auto !important;
+      aspect-ratio: 1;
+      min-width: 0;
+      padding: 2px;
+      border-radius: 7px;
+      font-size: var(--fit-label-size, 9px);
+      line-height: 1.05;
+      overflow: hidden;
+    }
+    body.fit-all .btn .icon {
+      width: var(--fit-icon-size, 24px);
+      height: var(--fit-icon-size, 24px);
+      margin: 0 auto 2px auto;
+    }
+    body.fit-all .btn .icon svg {
+      width: var(--fit-icon-size, 24px);
+      height: var(--fit-icon-size, 24px);
+    }
+    body.fit-all .btn small {
+      margin-top: 2px;
+      font-size: var(--fit-key-size, 8px);
+      line-height: 1;
+    }
   </style>
 </head>
 <body>
@@ -673,8 +802,11 @@ namespace EDSC.Desktop.Services
     <div class=""toolbar"">
       <button id=""reload"">Reload config</button>
       <button id=""fullscreen"">Fullscreen</button>
+      <button id=""fitAll"" aria-pressed=""false"">Fit all</button>
+      <button id=""blades"" aria-pressed=""false"">Blades</button>
       <button id=""voiceBtn"" class=""voice-btn"">🎤 Voice</button>
       <button id=""trackingBtn"" class=""tracking-btn"">📹 Face Tracking</button>
+      <button id=""previewBtn"" aria-pressed=""true"" style=""display:none;"">⏹ Stop Preview</button>
     </div>
     <label class=""tracking-mode"">
       <input type=""checkbox"" id=""phoneModeToggle"">
@@ -692,6 +824,7 @@ namespace EDSC.Desktop.Services
       </div>
       <div id=""poseReadout"" class=""pose-readout"" style=""display:none;""></div>
     </div>
+    <div id=""bladeNav"" role=""tablist"" aria-label=""Control categories""></div>
     <div id=""voiceFeedback"" class=""voice-feedback"" style=""display:none;"">
       <div class=""voice-status"">
         <span id=""voiceStatusIcon"">⚪</span>
@@ -707,7 +840,137 @@ namespace EDSC.Desktop.Services
     const gridEl = document.getElementById('grid');
     const reloadBtn = document.getElementById('reload');
     const fullscreenBtn = document.getElementById('fullscreen');
+    const fitAllBtn = document.getElementById('fitAll');
+    const bladesBtn = document.getElementById('blades');
+    const bladeNavEl = document.getElementById('bladeNav');
     const iconCache = new Map();
+    const FIT_ALL_STORAGE_KEY = 'edsc-fit-all';
+    const BLADES_STORAGE_KEY = 'edsc-blades';
+    let bladesEnabled = false;
+    let activeBladeIndex = 0;
+
+    function setActiveBlade(index) {
+      const sections = Array.from(gridEl.querySelectorAll(':scope > .category'));
+      if (!sections.length) return;
+
+      activeBladeIndex = (index + sections.length) % sections.length;
+      sections.forEach((section, sectionIndex) => {
+        section.classList.toggle('active-blade', sectionIndex === activeBladeIndex);
+      });
+      Array.from(bladeNavEl.children).forEach((tab, tabIndex) => {
+        const selected = tabIndex === activeBladeIndex;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      requestAnimationFrame(updateFitLayout);
+    }
+
+    function rebuildBladeNav(categories) {
+      bladeNavEl.innerHTML = '';
+      bladeNavEl.style.setProperty('--blade-count', String(Math.max(1, categories.length)));
+      const sections = Array.from(gridEl.querySelectorAll(':scope > .category'));
+      categories.forEach((category, index) => {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.setAttribute('role', 'tab');
+        tab.textContent = category;
+        tab.title = category;
+        const firstButton = sections[index] && sections[index].querySelector('.btn');
+        tab.style.background = firstButton ? firstButton.style.background : '#374151';
+        tab.addEventListener('click', () => setActiveBlade(index));
+        bladeNavEl.appendChild(tab);
+      });
+      setActiveBlade(Math.min(activeBladeIndex, Math.max(0, categories.length - 1)));
+    }
+
+    function setBlades(enabled, persist) {
+      bladesEnabled = enabled;
+      const active = enabled && document.body.classList.contains('fit-all');
+      document.body.classList.toggle('blades-mode', active);
+      bladesBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+      bladesBtn.textContent = enabled ? 'All icons' : 'Blades';
+      if (persist) {
+        try {
+          localStorage.setItem(BLADES_STORAGE_KEY, enabled ? '1' : '0');
+        } catch (err) {
+          // Storage is optional; the mode still works for this page load.
+        }
+      }
+      setActiveBlade(activeBladeIndex);
+      requestAnimationFrame(updateFitLayout);
+    }
+
+    function updateFitLayout() {
+      if (!document.body.classList.contains('fit-all')) {
+        gridEl.style.removeProperty('--fit-columns');
+        gridEl.style.removeProperty('--fit-icon-size');
+        gridEl.style.removeProperty('--fit-label-size');
+        gridEl.style.removeProperty('--fit-key-size');
+        gridEl.style.removeProperty('--fit-cell-size');
+        return;
+      }
+
+      const isBlades = document.body.classList.contains('blades-mode');
+      const buttonScope = isBlades ? gridEl.querySelector('.category.active-blade') : gridEl;
+      const buttonCount = buttonScope ? buttonScope.querySelectorAll('.btn').length : 0;
+      if (!buttonCount) return;
+
+      const gap = 4;
+      const availableWidth = Math.max(240, window.innerWidth - 8);
+      const gridTop = gridEl.getBoundingClientRect().top;
+      const availableHeight = Math.max(160, window.innerHeight - gridTop - 4);
+      let columns = Math.max(2, Math.ceil(Math.sqrt(buttonCount * availableWidth / availableHeight)));
+      if (isBlades) {
+        columns = Math.max(columns, Math.ceil(availableWidth / 120));
+      }
+      columns = Math.min(columns, buttonCount);
+
+      function dimensionsFor(columnCount) {
+        const rows = Math.ceil(buttonCount / columnCount);
+        const cellSize = (availableWidth - gap * (columnCount - 1)) / columnCount;
+        return { rows, cellSize, height: rows * cellSize + gap * (rows - 1) };
+      }
+
+      let dimensions = dimensionsFor(columns);
+      while (columns < buttonCount && dimensions.height > availableHeight) {
+        columns += 1;
+        dimensions = dimensionsFor(columns);
+      }
+
+      const iconSize = Math.max(14, Math.min(32, Math.floor(dimensions.cellSize * 0.42)));
+      const labelSize = Math.max(7, Math.min(11, dimensions.cellSize * 0.13));
+      const keySize = Math.max(7, Math.min(9, dimensions.cellSize * 0.11));
+
+      gridEl.style.setProperty('--fit-columns', String(columns));
+      gridEl.style.setProperty('--fit-icon-size', iconSize + 'px');
+      gridEl.style.setProperty('--fit-label-size', labelSize.toFixed(1) + 'px');
+      gridEl.style.setProperty('--fit-key-size', keySize.toFixed(1) + 'px');
+      gridEl.style.setProperty('--fit-cell-size', Math.min(120, dimensions.cellSize).toFixed(1) + 'px');
+    }
+
+    function setFitAll(enabled, persist) {
+      document.body.classList.toggle('fit-all', enabled);
+      document.body.classList.toggle('blades-mode', enabled && bladesEnabled);
+      fitAllBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+      fitAllBtn.textContent = enabled ? 'Exit fit' : 'Fit all';
+      if (persist) {
+        try {
+          localStorage.setItem(FIT_ALL_STORAGE_KEY, enabled ? '1' : '0');
+        } catch (err) {
+          // Storage is optional; the mode still works for this page load.
+        }
+      }
+      requestAnimationFrame(updateFitLayout);
+    }
+
+    try {
+      bladesEnabled = localStorage.getItem(BLADES_STORAGE_KEY) === '1';
+      setFitAll(localStorage.getItem(FIT_ALL_STORAGE_KEY) === '1', false);
+      setBlades(bladesEnabled, false);
+    } catch (err) {
+      setFitAll(false, false);
+      setBlades(false, false);
+    }
 
     // Voice control state and configuration
     const voiceControl = {
@@ -1227,6 +1490,8 @@ namespace EDSC.Desktop.Services
           section.appendChild(grid);
           gridEl.appendChild(section);
         }
+        rebuildBladeNav(order);
+        requestAnimationFrame(updateFitLayout);
       } catch (err) {
         statusEl.textContent = 'Failed to load config.';
       }
@@ -1259,6 +1524,39 @@ namespace EDSC.Desktop.Services
     }
 
     reloadBtn.addEventListener('click', loadConfig);
+    fitAllBtn.addEventListener('click', () => {
+      setFitAll(!document.body.classList.contains('fit-all'), true);
+    });
+    bladesBtn.addEventListener('click', () => {
+      setBlades(!bladesEnabled, true);
+    });
+    bladeNavEl.addEventListener('keydown', event => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setActiveBlade(activeBladeIndex - 1);
+        bladeNavEl.children[activeBladeIndex]?.focus();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        setActiveBlade(activeBladeIndex + 1);
+        bladeNavEl.children[activeBladeIndex]?.focus();
+      }
+    });
+    let bladeSwipeStartX = null;
+    gridEl.addEventListener('touchstart', event => {
+      if (document.body.classList.contains('blades-mode') && event.touches.length === 1) {
+        bladeSwipeStartX = event.touches[0].clientX;
+      }
+    }, { passive: true });
+    gridEl.addEventListener('touchend', event => {
+      if (bladeSwipeStartX === null || !document.body.classList.contains('blades-mode')) return;
+      const endX = event.changedTouches[0]?.clientX;
+      if (typeof endX === 'number' && Math.abs(endX - bladeSwipeStartX) > 45) {
+        setActiveBlade(activeBladeIndex + (endX < bladeSwipeStartX ? 1 : -1));
+      }
+      bladeSwipeStartX = null;
+    }, { passive: true });
+    window.addEventListener('resize', () => requestAnimationFrame(updateFitLayout));
+    document.addEventListener('fullscreenchange', () => requestAnimationFrame(updateFitLayout));
     fullscreenBtn.addEventListener('click', async () => {
       try {
         if (!document.fullscreenElement) {
@@ -1301,7 +1599,8 @@ namespace EDSC.Desktop.Services
       fps: 0,
       frameCount: 0,
       lastFpsUpdate: Date.now(),
-      phoneMode: false
+      phoneMode: false,
+      previewVisible: true
     };
 
     // On-phone tracking with MediaPipe Face Landmarker: the browser runs the model and
@@ -1625,6 +1924,7 @@ namespace EDSC.Desktop.Services
       tracking.phoneMode = isPhoneMode();
 
       document.getElementById('trackingPanel').style.display = 'block';
+      requestAnimationFrame(updateFitLayout);
       document.getElementById('trackingBtn').classList.add('active');
       document.getElementById('trackingBtn').textContent = '⏹ Stop Tracking';
       document.getElementById('poseReadout').style.display = tracking.phoneMode ? 'block' : 'none';
@@ -1689,12 +1989,18 @@ namespace EDSC.Desktop.Services
         };
 
         tracking.isActive = true;
+        tracking.previewVisible = true;
+        const previewBtn = document.getElementById('previewBtn');
+        previewBtn.style.display = 'block';
+        previewBtn.setAttribute('aria-pressed', 'true');
+        previewBtn.textContent = '⏹ Stop Preview';
 
       } catch (error) {
         console.error('[Tracking] Error starting:', error);
         const message = error && error.message ? error.message : String(error);
         stopTracking(true);
         document.getElementById('trackingPanel').style.display = 'block';
+        requestAnimationFrame(updateFitLayout);
         setTrackingStatus('Error: ' + message);
       }
     }
@@ -1791,8 +2097,14 @@ namespace EDSC.Desktop.Services
       if (!keepPanelOpen) {
         document.getElementById('trackingPanel').style.display = 'none';
       }
+      requestAnimationFrame(updateFitLayout);
       document.getElementById('trackingBtn').classList.remove('active');
       document.getElementById('trackingBtn').textContent = '📹 Face Tracking';
+      tracking.previewVisible = true;
+      const previewBtn = document.getElementById('previewBtn');
+      previewBtn.style.display = 'none';
+      previewBtn.setAttribute('aria-pressed', 'true');
+      previewBtn.textContent = '⏹ Stop Preview';
       document.getElementById('trackingStatusText').textContent = 'Ready';
       document.getElementById('trackingFps').textContent = '0 FPS';
       document.getElementById('poseReadout').style.display = 'none';
@@ -1806,6 +2118,17 @@ namespace EDSC.Desktop.Services
       }
     }
 
+    function togglePreview() {
+      if (!tracking.isActive) return;
+
+      tracking.previewVisible = !tracking.previewVisible;
+      document.getElementById('trackingPanel').style.display = tracking.previewVisible ? 'block' : 'none';
+      const previewBtn = document.getElementById('previewBtn');
+      previewBtn.setAttribute('aria-pressed', tracking.previewVisible ? 'true' : 'false');
+      previewBtn.textContent = tracking.previewVisible ? '⏹ Stop Preview' : '▶ Show Preview';
+      requestAnimationFrame(updateFitLayout);
+    }
+
     // Initialize tracking
     initTracking();
 
@@ -1813,6 +2136,10 @@ namespace EDSC.Desktop.Services
     const trackingBtn = document.getElementById('trackingBtn');
     if (trackingBtn) {
       trackingBtn.addEventListener('click', toggleTracking);
+    }
+    const previewBtn = document.getElementById('previewBtn');
+    if (previewBtn) {
+      previewBtn.addEventListener('click', togglePreview);
     }
 
     loadConfig();
