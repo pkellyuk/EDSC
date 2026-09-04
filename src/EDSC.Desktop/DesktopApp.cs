@@ -284,7 +284,7 @@ namespace EDSC.Desktop
         }
 
         private const double TrackingScaleMin = 0.1;
-        private const double TrackingScaleMax = 100.0;
+        private const double TrackingScaleMax = 5.0;
         private const double TrackingSmoothingMin = 0.0;
         private const double TrackingSmoothingMax = 0.95;
 

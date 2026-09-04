@@ -26,6 +26,11 @@ namespace EDSC.Desktop.Services
         private readonly object _smoothingLock = new object();
         private HeadPose? _lastSmoothedPose;
 
+        // PnP warm start: previous solution used as the initial guess for the next frame
+        private readonly double[] _prevRvec = new double[3];
+        private readonly double[] _prevTvec = new double[3];
+        private bool _hasPrevPnpSolution;
+
         // Model input sizes
         private const int FaceDetectionWidth = 160;
         private const int FaceDetectionHeight = 120;
@@ -37,18 +42,25 @@ namespace EDSC.Desktop.Services
         private const float LandmarkMean = 0.445313568967f;
         private const float LandmarkStd = 0.269246187f;
         private static readonly float[] DetectionVariance = new[] { 0.1f, 0.2f };
-        private const float BaseTranslationScale = 0.1f;
+        private const float BaseTranslationScale = 0.1f; // model units (mm) -> cm for Opentrack
 
-        // 3D face model points (simplified - key facial landmarks)
+        // Reject a PnP solution whose reprojection error exceeds this fraction of the eye-corner distance
+        private const double MaxReprojectionErrorRatio = 0.2;
+
+        // 3D face model points in millimetres, camera convention: X right, Y down, Z away from camera.
+        // A frontal face facing the camera therefore has identity rotation.
         private static readonly Vector3[] Model3DPoints = new[]
         {
-            new Vector3(0.0f, 0.0f, 0.0f),           // Nose tip
-            new Vector3(0.0f, -63.6f, -12.5f),        // Chin
-            new Vector3(-43.3f, 32.7f, -26.0f),       // Left eye left corner
-            new Vector3(43.3f, 32.7f, -26.0f),        // Right eye right corner
-            new Vector3(-28.9f, -28.9f, -24.1f),      // Left mouth corner
-            new Vector3(28.9f, -28.9f, -24.1f)        // Right mouth corner
+            new Vector3(0.0f, 0.0f, 0.0f),            // Nose tip
+            new Vector3(0.0f, 63.6f, 12.5f),          // Chin
+            new Vector3(-43.3f, -32.7f, 26.0f),       // Image-left eye outer corner
+            new Vector3(43.3f, -32.7f, 26.0f),        // Image-right eye outer corner
+            new Vector3(-28.9f, 28.9f, 24.1f),        // Image-left mouth corner
+            new Vector3(28.9f, 28.9f, 24.1f)          // Image-right mouth corner
         };
+
+        // Distance between the two eye-corner model points, used for the initial depth estimate
+        private static readonly double ModelEyeCornerDistance = 86.6;
 
         // Corresponding 2D landmark indices (0-based, out of 66 landmarks)
         private static readonly int[] LandmarkIndices = new[] { 30, 8, 36, 45, 48, 54 };
@@ -580,56 +592,97 @@ namespace EDSC.Desktop.Services
                     image2DPoints[i] = landmarks[LandmarkIndices[i]];
                 }
 
-                // Simplified camera matrix (focal length estimation)
-                float focalLength = imageWidth;
-                float cx = imageWidth / 2f;
-                float cy = imageHeight / 2f;
+                // Pinhole camera. Focal length is approximated as the image width until a FOV setting exists.
+                double focalLength = imageWidth;
+                double cx = imageWidth / 2.0;
+                double cy = imageHeight / 2.0;
 
-                // Use simplified pose estimation
-                // For a full implementation, you'd use OpenCV's solvePnP
-                // Here we'll do a basic estimation from landmark positions
+                double eyeDistancePx = Vector2.Distance(image2DPoints[2], image2DPoints[3]);
+                if (eyeDistancePx < 1.0)
+                {
+                    return null;
+                }
 
-                // Calculate center of face
-                float centerX = image2DPoints.Average(p => p.X);
-                float centerY = image2DPoints.Average(p => p.Y);
+                double maxRms = Math.Max(2.0, eyeDistancePx * MaxReprojectionErrorRatio);
 
-                // Estimate distance based on face size
-                float faceWidth = Math.Abs(image2DPoints[2].X - image2DPoints[3].X); // Eye corners
-                float avgFaceWidthMm = 140f; // Average human face width in mm
-                float z = (avgFaceWidthMm * focalLength) / Math.Max(faceWidth, 1f);
+                var rvec = new double[3];
+                var tvec = new double[3];
+                double rms;
+                bool solved = false;
 
-                // Estimate rotation from landmark geometry
-                // Yaw: horizontal rotation
-                float leftEyeX = image2DPoints[2].X;
-                float rightEyeX = image2DPoints[3].X;
-                float eyeMidX = (leftEyeX + rightEyeX) / 2f;
-                float yaw = (float)(Math.Atan2(eyeMidX - centerX, focalLength) * (180f / MathF.PI));
+                // First try: refine from the previous frame's solution
+                bool hasPrev;
+                lock (_smoothingLock)
+                {
+                    hasPrev = _hasPrevPnpSolution;
+                    if (hasPrev)
+                    {
+                        Array.Copy(_prevRvec, rvec, 3);
+                        Array.Copy(_prevTvec, tvec, 3);
+                    }
+                }
 
-                // Pitch: vertical rotation
-                float eyeY = (image2DPoints[2].Y + image2DPoints[3].Y) / 2f;
-                float chinY = image2DPoints[1].Y;
-                float pitch = (float)(Math.Atan2(eyeY - chinY, focalLength / 2f) * (180f / MathF.PI));
+                if (hasPrev)
+                {
+                    solved = PnpSolver.TrySolve(Model3DPoints, image2DPoints, focalLength, focalLength, cx, cy, rvec, tvec, out rms)
+                        && rms <= maxRms;
+                }
 
-                // Roll: tilt rotation
-                float roll = (float)(Math.Atan2(image2DPoints[3].Y - image2DPoints[2].Y,
-                                        image2DPoints[3].X - image2DPoints[2].X) * (180f / MathF.PI));
+                // Second try: start from a frontal face at the depth implied by the eye spacing
+                if (!solved)
+                {
+                    double z0 = focalLength * ModelEyeCornerDistance / eyeDistancePx;
+                    rvec[0] = 0.0;
+                    rvec[1] = 0.0;
+                    rvec[2] = 0.0;
+                    tvec[0] = (image2DPoints[0].X - cx) * z0 / focalLength;
+                    tvec[1] = (image2DPoints[0].Y - cy) * z0 / focalLength;
+                    tvec[2] = z0;
 
-                // Convert 2D center to 3D position
-                float x = (centerX - cx) * z / focalLength;
-                float y = (centerY - cy) * z / focalLength;
-                float translationScale = BaseTranslationScale * TranslationScale;
-                float yawScale = YawScale;
-                float pitchScale = RotationScale;
-                float rollScale = RollScale;
+                    solved = PnpSolver.TrySolve(Model3DPoints, image2DPoints, focalLength, focalLength, cx, cy, rvec, tvec, out rms)
+                        && rms <= maxRms;
+                }
+
+                lock (_smoothingLock)
+                {
+                    if (solved)
+                    {
+                        Array.Copy(rvec, _prevRvec, 3);
+                        Array.Copy(tvec, _prevTvec, 3);
+                        _hasPrevPnpSolution = true;
+                    }
+                    else
+                    {
+                        _hasPrevPnpSolution = false;
+                    }
+                }
+
+                if (!solved)
+                {
+                    return null;
+                }
+
+                // Decompose R = Ry(yaw) * Rx(pitch) * Rz(roll) in the X-right, Y-down, Z-forward frame.
+                // Signs are chosen so that: yaw > 0 when the face turns toward image-right,
+                // pitch > 0 when the face tilts up, roll > 0 when the image-right side of the face drops.
+                var r = new double[9];
+                PnpSolver.Rodrigues(rvec[0], rvec[1], rvec[2], r);
+
+                double yawRad = -Math.Atan2(r[2], r[8]);
+                double pitchRad = Math.Asin(Math.Clamp(r[5], -1.0, 1.0));
+                double rollRad = Math.Atan2(r[3], r[4]);
+
+                const double RadToDeg = 180.0 / Math.PI;
+                double translationScale = BaseTranslationScale * TranslationScale;
 
                 return new HeadPose
                 {
-                    X = x * translationScale,
-                    Y = -y * translationScale,  // Invert Y to match typical coordinate system
-                    Z = z * translationScale,
-                    Yaw = yaw * yawScale,
-                    Pitch = pitch * pitchScale,
-                    Roll = roll * rollScale
+                    X = tvec[0] * translationScale,
+                    Y = -tvec[1] * translationScale,  // Y up is positive
+                    Z = tvec[2] * translationScale,
+                    Yaw = yawRad * RadToDeg * YawScale,
+                    Pitch = pitchRad * RadToDeg * RotationScale,
+                    Roll = rollRad * RadToDeg * RollScale
                 };
             }
             catch (Exception ex)
@@ -644,6 +697,7 @@ namespace EDSC.Desktop.Services
             lock (_smoothingLock)
             {
                 _lastSmoothedPose = null;
+                _hasPrevPnpSolution = false;
             }
         }
 

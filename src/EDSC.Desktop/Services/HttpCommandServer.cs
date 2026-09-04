@@ -12,6 +12,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace EDSC.Desktop.Services
@@ -28,6 +29,7 @@ namespace EDSC.Desktop.Services
         private AppConfig? _currentConfig;
 
         // Video streaming state
+        private const int MaxFrameBytes = 4 * 1024 * 1024;
         private byte[]? _latestFrame;
         private readonly object _frameLock = new object();
         private DateTime _lastFrameTime = DateTime.MinValue;
@@ -1380,17 +1382,50 @@ namespace EDSC.Desktop.Services
 
             WebSocket? webSocket = null;
 
+            // One-slot queue: the worker always sees the newest frame and stale frames are dropped,
+            // so inference never falls behind the camera and poses are produced in order.
+            var frameQueue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = true
+            });
+
+            var worker = Task.Run(() => ProcessFrameQueueAsync(frameQueue.Reader));
+
             try
             {
                 webSocket = await context.WebSockets.AcceptWebSocketAsync();
                 Console.WriteLine("[HttpCommandServer] WebSocket connection established");
 
-                var buffer = new byte[1024 * 1024]; // 1MB buffer for frame data
+                var chunk = new byte[64 * 1024];
+                var message = new MemoryStream();
+                var ackMessage = Encoding.UTF8.GetBytes("OK");
                 var frameStartTime = DateTime.UtcNow;
 
                 while (webSocket.State == WebSocketState.Open)
                 {
-                    var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    message.SetLength(0);
+                    WebSocketReceiveResult result;
+
+                    // Accumulate fragments until the full message has arrived
+                    do
+                    {
+                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(chunk), CancellationToken.None);
+
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            break;
+                        }
+
+                        if (message.Length + result.Count > MaxFrameBytes)
+                        {
+                            throw new InvalidOperationException($"Video frame exceeds {MaxFrameBytes} bytes");
+                        }
+
+                        message.Write(chunk, 0, result.Count);
+                    }
+                    while (!result.EndOfMessage);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
@@ -1399,76 +1434,33 @@ namespace EDSC.Desktop.Services
                         break;
                     }
 
-                    if (result.MessageType == WebSocketMessageType.Binary)
+                    if (result.MessageType != WebSocketMessageType.Binary || message.Length == 0)
                     {
-                        Console.WriteLine($"[HttpCommandServer] Received frame: {result.Count} bytes");
-
-                        // Store the frame
-                        var frameData = new byte[result.Count];
-                        Array.Copy(buffer, 0, frameData, 0, result.Count);
-
-                        lock (_frameLock)
-                        {
-                            _latestFrame = frameData;
-                            _frameCount++;
-
-                            // Calculate FPS
-                            var elapsed = (DateTime.UtcNow - frameStartTime).TotalSeconds;
-                            if (elapsed > 0)
-                            {
-                                _currentFps = _frameCount / elapsed;
-                            }
-
-                            _lastFrameTime = DateTime.UtcNow;
-                        }
-
-                        // Fire event for UI update
-                        FrameReceived?.Invoke(this, frameData);
-
-                        // Process frame with face tracking service (async, don't wait)
-                        if (_faceTrackingService == null)
-                        {
-                            Console.WriteLine("[HttpCommandServer] Face tracking service is null - skipping processing");
-                        }
-                        else if (!_faceTrackingService.IsInitialized)
-                        {
-                            Console.WriteLine("[HttpCommandServer] Face tracking service not initialized - skipping processing");
-                        }
-                        else
-                        {
-                            Console.WriteLine("[HttpCommandServer] Processing frame with face tracking service");
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    Console.WriteLine($"[HttpCommandServer] Task.Run started, frame size: {frameData.Length}");
-                                    var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
-                                    Console.WriteLine($"[HttpCommandServer] ProcessFrameAsync completed, pose is null: {pose == null}");
-                                    if (pose != null)
-                                    {
-                                        Console.WriteLine($"[HttpCommandServer] Pose detected: X={pose.X:F2}, Y={pose.Y:F2}, Z={pose.Z:F2}");
-                                        // Fire event for UI update
-                                        PoseDetected?.Invoke(this, pose);
-
-                                        // Send to Opentrack
-                                        if (_opentrackSender != null && _opentrackSender.IsConnected)
-                                        {
-                                            await _opentrackSender.SendPoseAsync(pose);
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[HttpCommandServer] Error processing frame: {ex.Message}");
-                                    Console.WriteLine($"[HttpCommandServer] Stack trace: {ex.StackTrace}");
-                                }
-                            });
-                        }
-
-                        // Send acknowledgment
-                        var ackMessage = Encoding.UTF8.GetBytes("OK");
-                        await webSocket.SendAsync(new ArraySegment<byte>(ackMessage), WebSocketMessageType.Text, true, CancellationToken.None);
+                        continue;
                     }
+
+                    var frameData = message.ToArray();
+
+                    lock (_frameLock)
+                    {
+                        _latestFrame = frameData;
+                        _frameCount++;
+
+                        var elapsed = (DateTime.UtcNow - frameStartTime).TotalSeconds;
+                        if (elapsed > 0)
+                        {
+                            _currentFps = _frameCount / elapsed;
+                        }
+
+                        _lastFrameTime = DateTime.UtcNow;
+                    }
+
+                    FrameReceived?.Invoke(this, frameData);
+
+                    // Hand to the tracking worker; replaces any frame it has not picked up yet
+                    frameQueue.Writer.TryWrite(frameData);
+
+                    await webSocket.SendAsync(new ArraySegment<byte>(ackMessage), WebSocketMessageType.Text, true, CancellationToken.None);
                 }
 
                 Console.WriteLine("[HttpCommandServer] WebSocket connection closed");
@@ -1489,8 +1481,62 @@ namespace EDSC.Desktop.Services
                     }
                 }
             }
+            finally
+            {
+                frameQueue.Writer.TryComplete();
+
+                try
+                {
+                    await worker;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[HttpCommandServer] Frame worker ended with error: {ex.Message}");
+                }
+            }
 
             Debug.WriteLine("[HttpCommandServer] Exit: HandleVideoWebSocket");
+        }
+
+        /// <summary>
+        /// Single consumer for the video frame queue. Runs inference serially so poses
+        /// are emitted in frame order and smoothing sees a monotonic sequence.
+        /// </summary>
+        private async Task ProcessFrameQueueAsync(ChannelReader<byte[]> reader)
+        {
+            if (reader == null)
+            {
+                return;
+            }
+
+            await foreach (var frameData in reader.ReadAllAsync())
+            {
+                if (_faceTrackingService == null || !_faceTrackingService.IsInitialized)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
+                    if (pose == null)
+                    {
+                        continue;
+                    }
+
+                    PoseDetected?.Invoke(this, pose);
+
+                    if (_opentrackSender != null && _opentrackSender.IsConnected)
+                    {
+                        await _opentrackSender.SendPoseAsync(pose);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[HttpCommandServer] Error processing frame: {ex.Message}");
+                    Console.WriteLine($"[HttpCommandServer] Stack trace: {ex.StackTrace}");
+                }
+            }
         }
 
         /// <summary>
