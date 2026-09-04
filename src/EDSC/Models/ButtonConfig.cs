@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace EDSC.Models
@@ -31,8 +32,15 @@ namespace EDSC.Models
         [JsonPropertyName("size")]
         public int Size { get; set; }
 
+        /// <summary>
+        /// Extra spoken phrases that trigger this button, in addition to its label ("frame shift", "jump").
+        /// </summary>
+        [JsonPropertyName("voiceAliases")]
+        public List<string> VoiceAliases { get; set; }
+
         public ButtonConfig()
         {
+            VoiceAliases = new List<string>();
             Id = string.Empty;
             Key = string.Empty;
             Icon = string.Empty;

@@ -79,6 +79,26 @@ namespace EDSC.Desktop.ViewModels
             set { Set(ref _size, value <= 0 ? 80 : value, nameof(Size)); }
         }
 
+        private string _voiceAliases = string.Empty;
+
+        /// <summary>
+        /// Comma-separated spoken phrases that also trigger this button.
+        /// </summary>
+        public string VoiceAliases
+        {
+            get { return _voiceAliases; }
+            set { Set(ref _voiceAliases, value ?? string.Empty, nameof(VoiceAliases)); }
+        }
+
+        private static List<string> SplitAliases(string? text)
+        {
+            return (text ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(a => a.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         public bool IsSelected
         {
             get { return _isSelected; }
@@ -105,7 +125,8 @@ namespace EDSC.Desktop.ViewModels
                 Color = config.Color,
                 IconSvg = config.IconSvg,
                 Icon = config.Icon,
-                Size = config.Size
+                Size = config.Size,
+                VoiceAliases = config.VoiceAliases != null ? string.Join(", ", config.VoiceAliases) : string.Empty
             };
         }
 
@@ -120,6 +141,7 @@ namespace EDSC.Desktop.ViewModels
                 IconSvg = IconSvg,
                 Icon = Icon,
                 Size = Size,
+                VoiceAliases = SplitAliases(VoiceAliases),
                 Category = string.IsNullOrWhiteSpace(category) ? "General" : category.Trim()
             };
         }
@@ -203,6 +225,7 @@ namespace EDSC.Desktop.ViewModels
         public ICommand AddButtonCommand { get; }
         public ICommand DeleteButtonCommand { get; }
         public ICommand ImportFromEliteCommand { get; }
+        public ICommand BindInEliteCommand { get; }
 
         /// <summary>
         /// Raised after a successful save so the server can pick up the new layout.
@@ -220,6 +243,9 @@ namespace EDSC.Desktop.ViewModels
             AddButtonCommand = new RelayCommand(() => { AddButton(); return Task.CompletedTask; }, () => true);
             DeleteButtonCommand = new RelayCommand<ButtonItem>(item => { DeleteButton(item); return Task.CompletedTask; }, _ => true);
             ImportFromEliteCommand = new RelayCommand(ImportFromEliteAsync, () => true);
+            BindInEliteCommand = new RelayCommand(BindInEliteAsync, () => true);
+            ConfirmBindCommand = new RelayCommand(ConfirmBindAsync, () => true);
+            CancelBindCommand = new RelayCommand(() => { CancelBind(); return Task.CompletedTask; }, () => true);
 
             LoadAvailableIcons();
         }
@@ -395,6 +421,144 @@ namespace EDSC.Desktop.ViewModels
                 Debug.WriteLine($"[ButtonEditor] Import failed: {ex.Message}");
                 StatusMessage = $"Import failed: {ex.Message}";
             }
+        }
+
+        // Bind-in-Elite is a two step flow: show exactly what would change, then write only on confirmation
+        private List<EliteAction> _pendingBindActions = new List<EliteAction>();
+        private bool _isBindPlanVisible;
+
+        public ObservableCollection<string> BindPlan { get; } = new ObservableCollection<string>();
+
+        public bool IsBindPlanVisible
+        {
+            get { return _isBindPlanVisible; }
+            private set
+            {
+                if (_isBindPlanVisible == value)
+                {
+                    return;
+                }
+
+                _isBindPlanVisible = value;
+                OnPropertyChanged(nameof(IsBindPlanVisible));
+            }
+        }
+
+        public ICommand ConfirmBindCommand { get; private set; } = null!;
+        public ICommand CancelBindCommand { get; private set; } = null!;
+
+        private List<EliteAction> UnboundCatalogueActions()
+        {
+            var unboundIds = Categories
+                .SelectMany(c => c.Buttons)
+                .Where(b => b.IsUnbound && !string.IsNullOrEmpty(b.Id))
+                .Select(b => b.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return EliteActionCatalog.Actions
+                .Where(a => unboundIds.Contains(a.Id))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Step 1: work out what binding in Elite would change and show it. Nothing is written.
+        /// </summary>
+        public async Task BindInEliteAsync()
+        {
+            try
+            {
+                IsBindPlanVisible = false;
+                BindPlan.Clear();
+
+                var actions = UnboundCatalogueActions();
+                if (actions.Count == 0)
+                {
+                    StatusMessage = "No unbound buttons match a known Elite action. Import from Elite Dangerous first.";
+                    return;
+                }
+
+                var plan = await Task.Run(() => _eliteBindings.BindMissingKeys(actions, _config.EliteControlSchemesPath, dryRun: true));
+
+                if (!plan.Success)
+                {
+                    StatusMessage = plan.Message;
+                    return;
+                }
+
+                foreach (var line in plan.Details)
+                {
+                    BindPlan.Add(line);
+                }
+
+                _pendingBindActions = actions;
+                IsBindPlanVisible = true;
+                StatusMessage = "Review the changes below. Nothing has been written to the game yet.";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ButtonEditor] Bind plan failed: {ex.Message}");
+                StatusMessage = $"Could not plan the bindings: {ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// Step 2: write the planned keys into the game's Custom preset, then re-import.
+        /// </summary>
+        public async Task ConfirmBindAsync()
+        {
+            var actions = _pendingBindActions;
+            IsBindPlanVisible = false;
+            BindPlan.Clear();
+
+            if (actions.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                StatusMessage = $"Writing keys for {actions.Count} action(s) into the game's Custom preset...";
+
+                var result = await Task.Run(() => _eliteBindings.BindMissingKeys(actions, _config.EliteControlSchemesPath));
+
+                foreach (var detail in result.Details)
+                {
+                    Debug.WriteLine($"[ButtonEditor] Bind: {detail}");
+                }
+
+                if (!result.Success)
+                {
+                    StatusMessage = result.Message;
+                    return;
+                }
+
+                // Pick the new keys up straight away
+                var bindings = await Task.Run(() => _eliteBindings.Load(_config.EliteControlSchemesPath));
+                _config.Buttons = Categories.SelectMany(c => c.Buttons.Select(b => b.ToConfig(c.Name))).ToList();
+                EliteBindingsService.ApplyToConfig(_config, bindings);
+                Populate(_config.Buttons);
+                IsDirty = true;
+
+                var backup = result.BackupPath != null ? $" Backup saved as {Path.GetFileName(result.BackupPath)}." : string.Empty;
+                StatusMessage = $"{result.Message}{backup} Press Save to keep the new keys.";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ButtonEditor] Bind in Elite failed: {ex.Message}");
+                StatusMessage = $"Bind failed: {ex.Message}";
+            }
+            finally
+            {
+                _pendingBindActions = new List<EliteAction>();
+            }
+        }
+
+        public void CancelBind()
+        {
+            _pendingBindActions = new List<EliteAction>();
+            BindPlan.Clear();
+            IsBindPlanVisible = false;
+            StatusMessage = "No changes were made to the game's bindings.";
         }
 
         /// <summary>

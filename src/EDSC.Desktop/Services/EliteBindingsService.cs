@@ -202,7 +202,10 @@ namespace EDSC.Desktop.Services
                     IconSvg = previous?.IconSvg is { Length: > 0 } ? previous.IconSvg : item.Action.IconSvg,
                     Icon = previous?.Icon ?? string.Empty,
                     Color = previous?.Color is { Length: > 0 } ? previous.Color : item.Action.Color,
-                    Size = previous?.Size > 0 ? previous.Size : 80
+                    Size = previous?.Size > 0 ? previous.Size : 80,
+                    VoiceAliases = previous?.VoiceAliases is { Count: > 0 }
+                        ? new List<string>(previous.VoiceAliases)
+                        : new List<string>(item.Action.VoiceAliases)
                 };
 
                 produced.Add(button);
@@ -248,6 +251,232 @@ namespace EDSC.Desktop.Services
             }
 
             return message;
+        }
+
+        /// <summary>
+        /// Outcome of writing keyboard bindings into the game's Custom preset.
+        /// </summary>
+        public sealed class BindResult
+        {
+            public bool Success { get; set; }
+            public string Message { get; set; } = string.Empty;
+            public List<string> Details { get; } = new List<string>();
+            public string? BackupPath { get; set; }
+        }
+
+        // Keys to hand out for unbound actions, least likely to collide with typing or existing bindings first
+        private static readonly string[] SpareKeyPool =
+        {
+            "Key_Numpad_Add", "Key_Numpad_Subtract", "Key_Numpad_Multiply", "Key_Numpad_Divide", "Key_Numpad_Decimal",
+            "Key_Numpad_0", "Key_Numpad_1", "Key_Numpad_2", "Key_Numpad_3", "Key_Numpad_4",
+            "Key_Numpad_5", "Key_Numpad_6", "Key_Numpad_7", "Key_Numpad_8", "Key_Numpad_9",
+            "Key_F5", "Key_F6", "Key_F7", "Key_F8", "Key_F9", "Key_F10", "Key_F11", "Key_F12",
+            "Key_Insert", "Key_Home", "Key_End", "Key_PageUp", "Key_PageDown",
+            "Key_B", "Key_I", "Key_K", "Key_V", "Key_G", "Key_H", "Key_J", "Key_L", "Key_M", "Key_N", "Key_O", "Key_P",
+            "Key_5", "Key_6", "Key_7", "Key_8", "Key_9", "Key_0",
+            "Key_LeftBracket", "Key_RightBracket", "Key_SemiColon", "Key_Comma", "Key_Period", "Key_Slash"
+        };
+
+        /// <summary>
+        /// Give keyboard keys to catalogue actions that have none, by editing the game's Custom preset.
+        /// The Custom file is created from the active ship preset if it does not exist, backed up before
+        /// being changed, and the StartPreset file is pointed at Custom for each scope that gained a key.
+        /// The game reads bindings at startup, so it must be restarted afterwards.
+        /// </summary>
+        /// <param name="actionsToBind">Catalogue actions that currently have no keyboard key.</param>
+        /// <param name="controlSchemesOverride">Optional path to the game's ControlSchemes folder.</param>
+        /// <param name="dryRun">True to work out what would change without touching any file.</param>
+        public BindResult BindMissingKeys(IEnumerable<EliteAction> actionsToBind, string? controlSchemesOverride = null, bool dryRun = false)
+        {
+            var result = new BindResult();
+            var wanted = (actionsToBind ?? Enumerable.Empty<EliteAction>()).ToList();
+
+            if (wanted.Count == 0)
+            {
+                result.Message = "Nothing to bind: every button already has a key in the game.";
+                return result;
+            }
+
+            var bindingsDir = DefaultBindingsDirectory;
+            if (!Directory.Exists(bindingsDir))
+            {
+                result.Message = $"Elite Dangerous bindings folder not found: {bindingsDir}";
+                return result;
+            }
+
+            try
+            {
+                var notes = new EliteBindingsResult();
+                var presets = ReadStartPresets(bindingsDir, notes);
+                var schemesDir = !string.IsNullOrWhiteSpace(controlSchemesOverride) && Directory.Exists(controlSchemesOverride)
+                    ? controlSchemesOverride
+                    : FindControlSchemesDirectory();
+
+                // Locate or create the Custom preset file
+                var customFile = ResolvePresetFile("Custom", bindingsDir, null);
+                XDocument doc;
+
+                if (customFile == null)
+                {
+                    var shipPreset = presets[(int)EliteScope.Ship];
+                    var source = ResolvePresetFile(shipPreset, bindingsDir, schemesDir);
+                    if (source == null)
+                    {
+                        result.Message = $"No Custom preset exists and the active ship preset '{shipPreset}' could not be found to copy from.";
+                        return result;
+                    }
+
+                    doc = XDocument.Load(source);
+                    var root = doc.Root ?? throw new InvalidOperationException("Preset file has no root element");
+                    root.SetAttributeValue("PresetName", "Custom");
+                    root.SetAttributeValue("MajorVersion", root.Attribute("MajorVersion")?.Value ?? "4");
+                    root.SetAttributeValue("MinorVersion", root.Attribute("MinorVersion")?.Value ?? "2");
+                    customFile = Path.Combine(bindingsDir, $"Custom.{root.Attribute("MajorVersion")!.Value}.{root.Attribute("MinorVersion")!.Value}.binds");
+                    result.Details.Add($"{(dryRun ? "Will create" : "Created")} {Path.GetFileName(customFile)} as a copy of {Path.GetFileName(source)}");
+                }
+                else
+                {
+                    doc = XDocument.Load(customFile);
+                    result.BackupPath = customFile + ".edsc-backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+                    result.Details.Add($"{(dryRun ? "Will edit" : "Edited")} {Path.GetFileName(customFile)} (backup: {Path.GetFileName(result.BackupPath)})");
+                    if (!dryRun)
+                    {
+                        File.Copy(customFile, result.BackupPath, overwrite: false);
+                    }
+                }
+
+                var rootElement = doc.Root ?? throw new InvalidOperationException("Preset file has no root element");
+
+                // Every keyboard key already in use in this file, so nothing gets double-assigned
+                var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var element in rootElement.Descendants())
+                {
+                    if (string.Equals((string?)element.Attribute("Device"), "Keyboard", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var key = (string?)element.Attribute("Key");
+                        if (!string.IsNullOrEmpty(key))
+                        {
+                            used.Add(key);
+                        }
+                    }
+                }
+
+                var boundScopes = new HashSet<EliteScope>();
+                int bound = 0;
+
+                foreach (var action in wanted)
+                {
+                    var element = rootElement.Element(action.Name);
+                    if (element == null)
+                    {
+                        result.Details.Add($"{action.Label}: not present in the preset file, skipped");
+                        continue;
+                    }
+
+                    // Already has a keyboard key here? Then the game just needs this file to be active
+                    if (ExtractKeyboardKey(doc, action.Name, notes) != null)
+                    {
+                        boundScopes.Add(action.Scope);
+                        result.Details.Add($"{action.Label}: already has a key in Custom");
+                        continue;
+                    }
+
+                    var slot = element.Element("Primary");
+                    if (slot == null || !IsNoDevice(slot))
+                    {
+                        slot = element.Element("Secondary");
+                    }
+
+                    if (slot == null || !IsNoDevice(slot))
+                    {
+                        result.Details.Add($"{action.Label}: both slots are taken by other devices, skipped");
+                        continue;
+                    }
+
+                    var spare = SpareKeyPool.FirstOrDefault(k => !used.Contains(k));
+                    if (spare == null)
+                    {
+                        result.Details.Add($"{action.Label}: no spare keys left, skipped");
+                        continue;
+                    }
+
+                    slot.SetAttributeValue("Device", "Keyboard");
+                    slot.SetAttributeValue("Key", spare);
+                    slot.Elements("Modifier").Remove();
+                    used.Add(spare);
+                    boundScopes.Add(action.Scope);
+                    bound++;
+                    result.Details.Add($"{action.Label} = {spare.Substring(4).Replace("Numpad_", "Numpad ")}");
+                }
+
+                if (bound == 0 && boundScopes.Count == 0)
+                {
+                    result.Message = "No keys could be assigned. " + string.Join(" ", result.Details);
+                    return result;
+                }
+
+                // Which scopes the game must be told to read from Custom
+                var startFile = Directory.GetFiles(bindingsDir, "StartPreset*.start")
+                    .OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault() ?? Path.Combine(bindingsDir, "StartPreset.4.start");
+
+                bool startChanged = false;
+                foreach (var scope in boundScopes)
+                {
+                    if (!string.Equals(presets[(int)scope], "Custom", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Details.Add($"{scope} controls switch from the '{presets[(int)scope]}' preset to 'Custom' in {Path.GetFileName(startFile)}");
+                        presets[(int)scope] = "Custom";
+                        startChanged = true;
+                    }
+                }
+
+                if (dryRun)
+                {
+                    result.Success = true;
+                    result.Message = $"{bound} key(s) would be assigned.";
+                    return result;
+                }
+
+                var settings = new System.Xml.XmlWriterSettings
+                {
+                    Indent = true,
+                    IndentChars = "\t",
+                    Encoding = new System.Text.UTF8Encoding(false),
+                    NewLineChars = "\r\n"
+                };
+                using (var writer = System.Xml.XmlWriter.Create(customFile, settings))
+                {
+                    doc.Save(writer);
+                }
+
+                if (startChanged)
+                {
+                    if (File.Exists(startFile))
+                    {
+                        File.Copy(startFile, startFile + ".edsc-backup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture), overwrite: false);
+                    }
+                    File.WriteAllLines(startFile, presets);
+                }
+
+                result.Success = true;
+                result.Message = bound > 0
+                    ? $"Assigned {bound} key(s) in {Path.GetFileName(customFile)}. Restart Elite Dangerous for the game to load them."
+                    : $"{Path.GetFileName(customFile)} already had the keys; the game now uses it. Restart Elite Dangerous.";
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[EliteBindingsService] BindMissingKeys failed: {ex}");
+                result.Message = $"Binding failed: {ex.Message}";
+                return result;
+            }
+        }
+
+        private static bool IsNoDevice(XElement slot)
+        {
+            var device = (string?)slot.Attribute("Device");
+            return string.IsNullOrEmpty(device) || device == "{NoDevice}";
         }
 
         private static string[] ReadStartPresets(string bindingsDir, EliteBindingsResult result)

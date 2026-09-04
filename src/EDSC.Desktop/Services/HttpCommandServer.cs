@@ -668,8 +668,7 @@ namespace EDSC.Desktop.Services
     body.fit-all .status,
     body.fit-all .tracking-mode,
     body.fit-all #voiceFeedback,
-    body.fit-all #reload,
-    body.fit-all #voiceBtn {
+    body.fit-all #reload {
       display: none !important;
     }
     body.fit-all main {
@@ -699,7 +698,7 @@ namespace EDSC.Desktop.Services
     #bladeNav button {
       min-width: 0;
       overflow: hidden;
-      padding: 7px 3px 5px;
+      padding: 9px 3px 7px;
       border: 1px solid rgba(255, 255, 255, 0.2);
       clip-path: polygon(7px 0, 100% 0, calc(100% - 7px) 100%, 0 100%);
       color: #fff;
@@ -1203,64 +1202,103 @@ namespace EDSC.Desktop.Services
     }
 
     // Fuzzy Matching Algorithm
+    // Letters and digits only, so 'hard points', 'hard-points' and 'Hardpoints' compare equal
+    function squashPhrase(text) {
+      return (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    // Every phrase that can trigger a button: its label, its id, and any voice aliases from the config
+    function phrasesFor(button) {
+      const phrases = [button.label, button.id];
+      if (Array.isArray(button.voiceAliases)) {
+        for (const alias of button.voiceAliases) {
+          phrases.push(alias);
+        }
+      }
+      return phrases.filter((p) => typeof p === 'string' && p.trim().length > 0);
+    }
+
+    function scorePhrase(normalized, squashedCommand, commandWords, phrase) {
+      const text = phrase.toLowerCase().trim();
+      const squashed = squashPhrase(text);
+      if (!squashed) {
+        return 0;
+      }
+
+      if (squashed === squashedCommand) {
+        return 1000;
+      }
+
+      let score = 0;
+
+      if (squashedCommand.length >= 3 && squashed.includes(squashedCommand)) {
+        score += 100;
+      } else if (squashed.length >= 3 && squashedCommand.includes(squashed)) {
+        score += 90;
+      }
+
+      const phraseWords = text.split(/\s+/);
+      for (const cmdWord of commandWords) {
+        for (const phraseWord of phraseWords) {
+          if (phraseWord.includes(cmdWord) || cmdWord.includes(phraseWord)) {
+            score += 30;
+          }
+
+          if (cmdWord.length >= 4 && phraseWord.length >= 4) {
+            const similarity = calculateSimilarity(cmdWord, phraseWord);
+            if (similarity > 0.7) {
+              score += 20 * similarity;
+            }
+          }
+        }
+      }
+
+      if (squashed.startsWith(squashedCommand)) {
+        score += 80;
+      }
+
+      return score;
+    }
+
     function findBestMatch(commandText) {
       if (!commandText || voiceControl.buttons.length === 0) {
         return null;
       }
 
       const normalized = commandText.toLowerCase().trim();
+      const squashedCommand = squashPhrase(normalized);
+      const commandWords = normalized.split(/\s+/).filter((w) => w.length > 0);
       let bestMatch = null;
       let bestScore = 0;
+      let bestPhrase = '';
 
       for (const button of voiceControl.buttons) {
         if (!button) {
           continue;
         }
 
-        const label = (button.label || '').toLowerCase();
-        const id = (button.id || '').toLowerCase();
+        for (const phrase of phrasesFor(button)) {
+          const score = scorePhrase(normalized, squashedCommand, commandWords, phrase);
 
-        if (label === normalized || id === normalized) {
-          return button;
-        }
-
-        let score = 0;
-
-        if (label.includes(normalized)) {
-          score += 100;
-        } else if (normalized.includes(label)) {
-          score += 90;
-        }
-
-        const commandWords = normalized.split(/\s+/);
-        const labelWords = label.split(/\s+/);
-
-        for (const cmdWord of commandWords) {
-          for (const labelWord of labelWords) {
-            if (labelWord.includes(cmdWord) || cmdWord.includes(labelWord)) {
-              score += 30;
-            }
-
-            if (cmdWord.length >= 4 && labelWord.length >= 4) {
-              const similarity = calculateSimilarity(cmdWord, labelWord);
-              if (similarity > 0.7) {
-                score += 20 * similarity;
-              }
-            }
+          if (score >= 1000) {
+            console.log('[Voice] Exact match:', phrase, '->', button.label);
+            return button;
           }
-        }
 
-        if (label.startsWith(normalized)) {
-          score += 80;
-        }
-
-        if (score > bestScore && score > 30) {
-          bestScore = score;
-          bestMatch = button;
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = button;
+            bestPhrase = phrase;
+          }
         }
       }
 
-      console.log('Best match:', bestMatch ? bestMatch.label : 'none', 'Score:', bestScore);
+      if (bestScore <= 30) {
+        console.log('[Voice] No match for:', normalized, 'best score', bestScore);
+        return null;
+      }
+
+      console.log('[Voice] Best match:', bestMatch ? bestMatch.label : 'none', 'via', bestPhrase, 'score', bestScore);
       return bestMatch;
     }
 
@@ -1379,6 +1417,37 @@ namespace EDSC.Desktop.Services
     const RESUME_KEY = 'edsc.resumeTracking';
     let configStamp = null;
     let reloading = false;
+    let reloadPending = false;
+
+    // A brief message that stays visible even when Fit all hides the status line
+    let toastTimer = null;
+    function showToast(text) {
+      let el = document.getElementById('edscToast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'edscToast';
+        el.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#7F1D1D;color:#FEE2E2;padding:8px 14px;border-radius:8px;font-size:13px;z-index:9999;max-width:90%;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.5)';
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.display = 'block';
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+      }
+      toastTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    function reloadForNewPage() {
+      reloading = true;
+      try {
+        if (tracking.isActive) {
+          sessionStorage.setItem(RESUME_KEY, '1');
+        }
+      } catch (e) {
+        // Storage unavailable; tracking just will not auto-resume
+      }
+      location.reload();
+    }
 
     async function checkConfigVersion() {
       if (reloading) {
@@ -1392,16 +1461,16 @@ namespace EDSC.Desktop.Services
         const v = await res.json();
 
         if (v.page && v.page !== PAGE_STAMP) {
-          console.log('[Config] PC app restarted with a new page, reloading');
-          reloading = true;
-          try {
-            if (tracking.isActive) {
-              sessionStorage.setItem(RESUME_KEY, '1');
+          // A reload drops fullscreen, so wait until the user leaves it
+          if (document.fullscreenElement) {
+            if (!reloadPending) {
+              console.log('[Config] PC app restarted; reload deferred until fullscreen ends');
+              reloadPending = true;
             }
-          } catch (e) {
-            // Storage unavailable; tracking just will not auto-resume
+            return;
           }
-          location.reload();
+          console.log('[Config] PC app restarted with a new page, reloading');
+          reloadForNewPage();
           return;
         }
 
@@ -1556,18 +1625,35 @@ namespace EDSC.Desktop.Services
       bladeSwipeStartX = null;
     }, { passive: true });
     window.addEventListener('resize', () => requestAnimationFrame(updateFitLayout));
-    document.addEventListener('fullscreenchange', () => requestAnimationFrame(updateFitLayout));
+    document.addEventListener('fullscreenchange', () => {
+      requestAnimationFrame(updateFitLayout);
+      fullscreenBtn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen';
+      if (!document.fullscreenElement && reloadPending) {
+        reloadPending = false;
+        reloadForNewPage();
+      }
+    });
     fullscreenBtn.addEventListener('click', async () => {
       try {
         if (!document.fullscreenElement) {
-          await document.documentElement.requestFullscreen();
+          const root = document.documentElement;
+          if (typeof root.requestFullscreen === 'function') {
+            await root.requestFullscreen({ navigationUI: 'hide' });
+          } else if (typeof root.webkitRequestFullscreen === 'function') {
+            root.webkitRequestFullscreen();
+          } else {
+            throw new Error('not supported by this browser');
+          }
           fullscreenBtn.textContent = 'Exit Fullscreen';
         } else {
           await document.exitFullscreen();
           fullscreenBtn.textContent = 'Fullscreen';
         }
       } catch (err) {
+        const reason = err && err.message ? err.message : String(err);
         statusEl.textContent = 'Fullscreen not available';
+        showToast('Fullscreen failed: ' + reason);
+        console.error('[Fullscreen] failed:', err);
       }
     });
 

@@ -45,6 +45,10 @@
             <Button Content="Import from Elite Dangerous"
                     Command="{Binding ImportFromEliteCommand}"
                     Background="#7C3AED" Foreground="White" Padding="10,6" CornerRadius="4"/>
+            <Button Content="Bind missing keys in Elite"
+                    Command="{Binding BindInEliteCommand}"
+                    ToolTip.Tip="Gives every greyed-out button a spare keyboard key by editing the game's Custom preset (backed up first). Restart Elite afterwards."
+                    Background="#B45309" Foreground="White" Padding="10,6" CornerRadius="4"/>
             <Button Content="Add button"
                     Command="{Binding AddButtonCommand}"
                     Padding="10,6" CornerRadius="4"/>
@@ -66,11 +70,38 @@
                        VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- Status -->
-        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                Background="#1F2937" Padding="8" CornerRadius="5" Margin="0,0,0,8">
-            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" Foreground="#F9FAFB"/>
-        </Border>
+        <!-- Status and bind confirmation -->
+        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Spacing="8" Margin="0,0,0,8">
+            <Border Background="#1F2937" Padding="8" CornerRadius="5">
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" Foreground="#F9FAFB"/>
+            </Border>
+
+            <Border Background="#3B2A0F" BorderBrush="#B45309" BorderThickness="1"
+                    Padding="10" CornerRadius="6"
+                    IsVisible="{Binding IsBindPlanVisible}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="This will change your Elite Dangerous control bindings"
+                               FontWeight="Bold" FontSize="13" Foreground="#FDE68A"/>
+                    <TextBlock Text="The file is backed up first. The game reads bindings at startup, so restart Elite afterwards. Nothing is written until you press 'Write bindings'."
+                               TextWrapping="Wrap" FontSize="11" Foreground="#FEF3C7"/>
+                    <ItemsControl ItemsSource="{Binding BindPlan}" Margin="4,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontSize="12" Foreground="#F9FAFB" Margin="0,1"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                        <Button Content="Write bindings"
+                                Command="{Binding ConfirmBindCommand}"
+                                Background="#B45309" Foreground="White" Padding="12,6" CornerRadius="4"/>
+                        <Button Content="Cancel"
+                                Command="{Binding CancelBindCommand}"
+                                Padding="12,6" CornerRadius="4"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
 
         <!-- Categories with draggable buttons -->
         <ScrollViewer Grid.Row="2" Grid.Column="0" Margin="0,0,10,0">
@@ -172,6 +203,8 @@
                     <TextBox Text="{Binding Label}"/>
                     <TextBlock Text="Key (e.g. U, F1, NUMPAD5, LSHIFT+U)" FontSize="11" Foreground="#D1D5DB"/>
                     <TextBox Text="{Binding Key}"/>
+                    <TextBlock Text="Voice aliases (comma separated, e.g. frame shift, jump)" FontSize="11" Foreground="#D1D5DB" TextWrapping="Wrap"/>
+                    <TextBox Text="{Binding VoiceAliases}"/>
                     <TextBlock Text="Icon" FontSize="11" Foreground="#D1D5DB"/>
                     <ComboBox ItemsSource="{Binding #Root.DataContext.AvailableIcons}"
                               SelectedItem="{Binding IconSvg}"
