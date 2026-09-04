@@ -1,5 +1,6 @@
 using EDSC.Services;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -21,6 +22,7 @@ namespace EDSC.Desktop.Services
         private const uint MapVkToVsc = 0x0000;
         private const string LogFileName = "edsc.keyboard.log";
         private const int LongPressDelayMs = 80;
+        private const int ModifierSettleDelayMs = 30;
 
         private readonly InputSimulator _simulator;
         private static readonly object LogLock = new object();
@@ -47,7 +49,14 @@ namespace EDSC.Desktop.Services
 
             try
             {
-                var virtualKey = ParseKey(key);
+                // "LSHIFT+U" style combos: everything before the last '+' is held as a modifier
+                var parts = key.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length == 0)
+                {
+                    return;
+                }
+
+                var virtualKey = ParseKey(parts[parts.Length - 1]);
 
                 if (virtualKey == null)
                 {
@@ -55,28 +64,44 @@ namespace EDSC.Desktop.Services
                     return;
                 }
 
-                Debug.WriteLine($"[WindowsKeyboardService] Pressing key {key} (VK code: {virtualKey})");
-                LogToFile($"Pressing key {key} (VK code: {virtualKey})");
-
-                Debug.WriteLine($"[WindowsKeyboardService] Using long press for key {key}");
-                LogToFile($"Long press key={key} delayMs={LongPressDelayMs}");
-
-                var downSent = TrySendInput(virtualKey.Value, keyUp: false);
-                if (!downSent)
+                var modifiers = new List<VirtualKeyCode>();
+                for (int i = 0; i < parts.Length - 1; i++)
                 {
-                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key down: {key}");
-                    LogToFile($"Fallback InputSimulator KeyDown key={key}");
-                    _simulator.Keyboard.KeyDown(virtualKey.Value);
+                    var modifier = ParseKey(parts[i]);
+                    if (modifier == null)
+                    {
+                        Debug.WriteLine($"[WindowsKeyboardService] Failed to parse modifier: {parts[i]}");
+                        LogToFile($"Failed to parse modifier '{parts[i]}' in '{key}'");
+                        return;
+                    }
+
+                    modifiers.Add(modifier.Value);
                 }
 
-                await Task.Delay(LongPressDelayMs);
+                Debug.WriteLine($"[WindowsKeyboardService] Pressing key {key} (VK code: {virtualKey}, modifiers: {modifiers.Count})");
+                LogToFile($"Pressing key {key} (VK code: {virtualKey}, modifiers: {modifiers.Count})");
 
-                var upSent = TrySendInput(virtualKey.Value, keyUp: true);
-                if (!upSent)
+                foreach (var modifier in modifiers)
                 {
-                    Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for key up: {key}");
-                    LogToFile($"Fallback InputSimulator KeyUp key={key}");
-                    _simulator.Keyboard.KeyUp(virtualKey.Value);
+                    SendKeyEvent(modifier, keyUp: false, key);
+                }
+
+                if (modifiers.Count > 0)
+                {
+                    await Task.Delay(ModifierSettleDelayMs);
+                }
+
+                SendKeyEvent(virtualKey.Value, keyUp: false, key);
+                await Task.Delay(LongPressDelayMs);
+                SendKeyEvent(virtualKey.Value, keyUp: true, key);
+
+                if (modifiers.Count > 0)
+                {
+                    await Task.Delay(ModifierSettleDelayMs);
+                    for (int i = modifiers.Count - 1; i >= 0; i--)
+                    {
+                        SendKeyEvent(modifiers[i], keyUp: true, key);
+                    }
                 }
 
                 Debug.WriteLine($"[WindowsKeyboardService] Key {key} pressed successfully");
@@ -294,6 +319,26 @@ namespace EDSC.Desktop.Services
             }
 
             return true;
+        }
+
+        private void SendKeyEvent(VirtualKeyCode virtualKey, bool keyUp, string originalKey)
+        {
+            if (TrySendInput(virtualKey, keyUp))
+            {
+                return;
+            }
+
+            Debug.WriteLine($"[WindowsKeyboardService] Falling back to InputSimulator for {(keyUp ? "key up" : "key down")}: {virtualKey} ({originalKey})");
+            LogToFile($"Fallback InputSimulator {(keyUp ? "KeyUp" : "KeyDown")} vk={virtualKey} key={originalKey}");
+
+            if (keyUp)
+            {
+                _simulator.Keyboard.KeyUp(virtualKey);
+            }
+            else
+            {
+                _simulator.Keyboard.KeyDown(virtualKey);
+            }
         }
 
         private static bool RequiresLongPress(string key)

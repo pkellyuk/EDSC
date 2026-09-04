@@ -1,0 +1,197 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EDSC.Desktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="700"
+             x:Class="EDSC.Desktop.Views.ButtonEditorView"
+             x:DataType="vm:ButtonEditorViewModel"
+             x:CompileBindings="False"
+             x:Name="Root">
+
+    <UserControl.Styles>
+        <Style Selector="Border.chip">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Width" Value="150"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+        </Style>
+        <Style Selector="Border.chip.selected">
+            <Setter Property="BorderBrush" Value="#F9FAFB"/>
+        </Style>
+        <Style Selector="Border.chip.unbound">
+            <Setter Property="Opacity" Value="0.45"/>
+        </Style>
+        <Style Selector="Border.category">
+            <Setter Property="Background" Value="#111827"/>
+            <Setter Property="BorderBrush" Value="#2A313D"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="Margin" Value="0,0,10,10"/>
+            <Setter Property="MinWidth" Value="180"/>
+            <Setter Property="MinHeight" Value="90"/>
+        </Style>
+    </UserControl.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,*" ColumnDefinitions="*,280" Margin="10">
+
+        <!-- Toolbar -->
+        <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                    Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+            <Button Content="Import from Elite Dangerous"
+                    Command="{Binding ImportFromEliteCommand}"
+                    Background="#7C3AED" Foreground="White" Padding="10,6" CornerRadius="4"/>
+            <Button Content="Add button"
+                    Command="{Binding AddButtonCommand}"
+                    Padding="10,6" CornerRadius="4"/>
+            <TextBox Text="{Binding NewCategoryName}"
+                     Watermark="New category name"
+                     Width="170"/>
+            <Button Content="Add category"
+                    Command="{Binding AddCategoryCommand}"
+                    Padding="10,6" CornerRadius="4"/>
+            <Button Content="Reload"
+                    Command="{Binding ReloadCommand}"
+                    Padding="10,6" CornerRadius="4"/>
+            <Button Content="Save"
+                    Command="{Binding SaveCommand}"
+                    Background="#10B981" Foreground="White" Padding="14,6" CornerRadius="4"/>
+            <TextBlock Text="●  unsaved changes"
+                       IsVisible="{Binding IsDirty}"
+                       Foreground="#F59E0B" FontSize="11"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Status -->
+        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                Background="#1F2937" Padding="8" CornerRadius="5" Margin="0,0,0,8">
+            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" Foreground="#F9FAFB"/>
+        </Border>
+
+        <!-- Categories with draggable buttons -->
+        <ScrollViewer Grid.Row="2" Grid.Column="0" Margin="0,0,10,0">
+            <ItemsControl ItemsSource="{Binding Categories}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Classes="category"
+                                DragDrop.AllowDrop="True"
+                                MaxWidth="500">
+                            <StackPanel Spacing="6">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding Name}"
+                                             FontWeight="Bold"
+                                             FontSize="13"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             Padding="2"/>
+                                    <Button Grid.Column="1"
+                                            Content="✕"
+                                            ToolTip.Tip="Remove empty category"
+                                            IsVisible="{Binding IsEmpty}"
+                                            Click="RemoveCategory_Click"
+                                            Background="Transparent"
+                                            Foreground="#9CA3AF"
+                                            Padding="6,2"/>
+                                </Grid>
+                                <TextBlock Text="Drop buttons here"
+                                           IsVisible="{Binding IsEmpty}"
+                                           Foreground="#6B7280"
+                                           FontSize="11"
+                                           Margin="4,8"/>
+                                <ItemsControl ItemsSource="{Binding Buttons}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Classes="chip"
+                                                    Classes.selected="{Binding IsSelected}"
+                                                    Classes.unbound="{Binding IsUnbound}"
+                                                    Background="{Binding Color}"
+                                                    DragDrop.AllowDrop="True"
+                                                    PointerPressed="Chip_PointerPressed"
+                                                    PointerMoved="Chip_PointerMoved"
+                                                    PointerReleased="Chip_PointerReleased">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   FontWeight="Bold"
+                                                                   FontSize="12"
+                                                                   Foreground="White"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding KeyDisplay}"
+                                                                   FontSize="10"
+                                                                   Foreground="#E5E7EB"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1"
+                                                            Content="✕"
+                                                            Command="{Binding #Root.DataContext.DeleteButtonCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Background="Transparent"
+                                                            Foreground="White"
+                                                            Padding="4,0"
+                                                            VerticalAlignment="Top"
+                                                            FontSize="10"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Selected button editor -->
+        <Border Grid.Row="2" Grid.Column="1"
+                Background="#111827" CornerRadius="10" Padding="12"
+                VerticalAlignment="Top">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Selected button" FontWeight="Bold" FontSize="13" Foreground="#F9FAFB"/>
+                <TextBlock Text="Click a button to edit it. Drag buttons between categories to regroup them."
+                           TextWrapping="Wrap" FontSize="11" Foreground="#9CA3AF"
+                           IsVisible="{Binding !#Root.DataContext.HasSelection}"/>
+                <StackPanel Spacing="6"
+                            IsVisible="{Binding #Root.DataContext.HasSelection}"
+                            DataContext="{Binding SelectedButton}">
+                    <TextBlock Text="Label" FontSize="11" Foreground="#D1D5DB"/>
+                    <TextBox Text="{Binding Label}"/>
+                    <TextBlock Text="Key (e.g. U, F1, NUMPAD5, LSHIFT+U)" FontSize="11" Foreground="#D1D5DB"/>
+                    <TextBox Text="{Binding Key}"/>
+                    <TextBlock Text="Icon" FontSize="11" Foreground="#D1D5DB"/>
+                    <ComboBox ItemsSource="{Binding #Root.DataContext.AvailableIcons}"
+                              SelectedItem="{Binding IconSvg}"
+                              HorizontalAlignment="Stretch"/>
+                    <TextBlock Text="Colour (hex)" FontSize="11" Foreground="#D1D5DB"/>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Text="{Binding Color}"/>
+                        <Border Grid.Column="1" Width="28" Height="28" CornerRadius="4" Margin="6,0,0,0"
+                                Background="{Binding Color}"/>
+                    </Grid>
+                    <TextBlock Text="Id" FontSize="11" Foreground="#D1D5DB"/>
+                    <TextBox Text="{Binding Id}"/>
+                    <Button Content="Delete button"
+                            Command="{Binding #Root.DataContext.DeleteButtonCommand}"
+                            CommandParameter="{Binding}"
+                            Background="#7F1D1D" Foreground="White"
+                            HorizontalAlignment="Stretch" Padding="8,6" CornerRadius="4"
+                            Margin="0,8,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

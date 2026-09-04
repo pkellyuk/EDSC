@@ -26,6 +26,12 @@ namespace EDSC.Models
         [JsonPropertyName("lastUpdatedBy")]
         public string LastUpdatedBy { get; set; }
 
+        /// <summary>
+        /// Optional path to the game's ControlSchemes folder, for when auto-detection cannot find the install.
+        /// </summary>
+        [JsonPropertyName("eliteControlSchemesPath")]
+        public string? EliteControlSchemesPath { get; set; }
+
         public AppConfig()
         {
             Server = new ServerConfig();

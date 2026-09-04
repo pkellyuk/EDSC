@@ -38,6 +38,7 @@ namespace EDSC.Desktop
         private PoseOutputRouter? _poseRouter;
         private GlobalHotkeyService? _centerHotkey;
         private ConnectionViewModel? _connectionViewModel;
+        private DateTime _lastPhoneStatusUpdate = DateTime.MinValue;
         private HeadPose? _lastPose;
 
         public override async void OnFrameworkInitializationCompleted()
@@ -186,7 +187,7 @@ namespace EDSC.Desktop
                         Debug.WriteLine("[DesktopApp] HTTP server auto-start disabled");
                     }
 
-                    var shellViewModel = new DesktopShellViewModel(connectionViewModel, configService, _serverConfig.Port);
+                    var shellViewModel = new DesktopShellViewModel(connectionViewModel, configService);
                     desktop.MainWindow = new MainWindow
                     {
                         DataContext = shellViewModel
@@ -270,10 +271,12 @@ namespace EDSC.Desktop
 
         private const double TrackingScaleMin = 0.1;
         private const double TrackingScaleMax = 5.0;
+        // Head movement of a few cm is a small fraction of the TrackIR axis range, so position needs far more gain
+        private const double TranslationScaleMax = 25.0;
         private const double TrackingSmoothingMin = 0.0;
         private const double TrackingSmoothingMax = 0.95;
 
-        private static async Task BindTrackingSensitivityAsync(
+        private async Task BindTrackingSensitivityAsync(
             ConnectionViewModel viewModel,
             FaceTrackingService faceTrackingService,
             PoseOutputRouter poseRouter,
@@ -328,10 +331,12 @@ namespace EDSC.Desktop
                     return;
                 }
 
-                UpdateTrackingConfigFromViewModel(config, viewModel);
-                config.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                config.LastUpdatedBy = "desktop-tracking";
-                await configService.SaveConfigurationAsync(config);
+                // Merge into whatever is on disk now, so button edits saved elsewhere are not overwritten
+                var latest = await configService.LoadConfigurationAsync() ?? config;
+                UpdateTrackingConfigFromViewModel(latest, viewModel);
+                latest.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                latest.LastUpdatedBy = "desktop-tracking";
+                await configService.SaveConfigurationAsync(latest);
             };
         }
 
@@ -342,29 +347,46 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.RotationScale)
                 || propertyName == nameof(ConnectionViewModel.RollScale)
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
-                || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled);
+                || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
+                || propertyName == nameof(ConnectionViewModel.ShowPcPreview);
         }
 
         private static void ApplyTrackingConfigToViewModel(TrackingConfig config, ConnectionViewModel viewModel)
         {
-            viewModel.TranslationScale = ClampTrackingScale(config.TranslationScale);
+            viewModel.TranslationScale = ClampTranslationScale(config.TranslationScale);
             viewModel.YawScale = ClampTrackingScale(config.YawScale);
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
             viewModel.DirectOutputEnabled = config.DirectOutput;
+            viewModel.ShowPcPreview = config.ShowPreview;
         }
 
-        private static void ApplyTrackingConfigToService(
+        private void ApplyTrackingConfigToService(
             ConnectionViewModel viewModel,
             FaceTrackingService faceTrackingService,
             PoseOutputRouter poseRouter)
         {
-            faceTrackingService.TranslationScale = (float)viewModel.TranslationScale;
-            faceTrackingService.YawScale = (float)viewModel.YawScale;
-            faceTrackingService.RotationScale = (float)viewModel.RotationScale;
-            faceTrackingService.RollScale = (float)viewModel.RollScale;
+            if (_commandServer is HttpCommandServer httpServer)
+            {
+                httpServer.PreviewEnabled = viewModel.ShowPcPreview;
+            }
+
+            if (!viewModel.ShowPcPreview && viewModel.HasVideoFrame)
+            {
+                viewModel.UpdateVideoFrame(null, 0, null, preserveStatus: true);
+            }
+
+            // The tracker emits unscaled poses; all gain is applied in the router after centring
+            faceTrackingService.TranslationScale = 1f;
+            faceTrackingService.YawScale = 1f;
+            faceTrackingService.RotationScale = 1f;
+            faceTrackingService.RollScale = 1f;
             faceTrackingService.SmoothingStrength = (float)viewModel.SmoothingStrength;
+            poseRouter.TranslationScale = viewModel.TranslationScale;
+            poseRouter.YawScale = viewModel.YawScale;
+            poseRouter.PitchScale = viewModel.RotationScale;
+            poseRouter.RollScale = viewModel.RollScale;
             poseRouter.SmoothingStrength = viewModel.SmoothingStrength;
             poseRouter.DirectOutputEnabled = viewModel.DirectOutputEnabled;
         }
@@ -382,6 +404,17 @@ namespace EDSC.Desktop
             config.Tracking.RollScale = viewModel.RollScale;
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
+            config.Tracking.ShowPreview = viewModel.ShowPcPreview;
+        }
+
+        private static double ClampTranslationScale(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0)
+            {
+                return 1.0;
+            }
+
+            return Math.Clamp(value, TrackingScaleMin, TranslationScaleMax);
         }
 
         private static double ClampTrackingScale(double value)
@@ -635,16 +668,17 @@ namespace EDSC.Desktop
                     return new ServerConfig();
                 }
 
-                var config = JsonSerializer.Deserialize<ServerConfig>(json);
+                // The file is the full AppConfig; the server settings live under its "server" section
+                var config = JsonSerializer.Deserialize<AppConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                if (config == null)
+                if (config?.Server == null)
                 {
                     Debug.WriteLine("[DesktopApp] Failed to deserialize config");
                     return new ServerConfig();
                 }
 
-                Debug.WriteLine("[DesktopApp] Configuration loaded successfully");
-                return config;
+                Debug.WriteLine($"[DesktopApp] Configuration loaded successfully (port {config.Server.Port})");
+                return config.Server;
             }
             catch (Exception ex)
             {
@@ -910,6 +944,8 @@ namespace EDSC.Desktop
                 return;
             }
 
+            httpServer.PreviewEnabled = _connectionViewModel?.ShowPcPreview ?? true;
+
             httpServer.PoseDetected += (sender, pose) =>
             {
                 _lastPose = pose;
@@ -919,6 +955,74 @@ namespace EDSC.Desktop
             httpServer.PoseLost += (sender, args) =>
             {
                 _lastPose = null;
+            };
+
+            // Phone-side tracking sends a small preview with its mesh already drawn; show it as-is
+            httpServer.PreviewFrameReceived += (sender, frameData) =>
+            {
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        var viewModel = _connectionViewModel;
+                        if (viewModel == null || !viewModel.ShowPcPreview)
+                        {
+                            return;
+                        }
+
+                        Bitmap bitmap;
+                        using (var ms = new MemoryStream(frameData))
+                        {
+                            bitmap = new Bitmap(ms);
+                        }
+
+                        viewModel.UpdateVideoFrame(bitmap, 0, null, preserveStatus: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[DesktopApp] Error showing phone preview: {ex.Message}");
+                    }
+                });
+            };
+
+            // Phone-side tracking sends poses; show the numbers on the status line
+            httpServer.PhonePoseReceived += (sender, pose) =>
+            {
+                var now = DateTime.UtcNow;
+                if (pose != null && (now - _lastPhoneStatusUpdate).TotalMilliseconds < 100)
+                {
+                    return;
+                }
+                _lastPhoneStatusUpdate = now;
+
+                var rate = httpServer.GetPhonePoseRate();
+                var text = pose == null
+                    ? "Phone tracking: no face"
+                    : $"Phone tracking  yaw {pose.Yaw,6:F1}°  pitch {pose.Pitch,6:F1}°  roll {pose.Roll,6:F1}°\n" +
+                      $"x {pose.X,6:F1} cm  y {pose.Y,6:F1} cm  z {pose.Z,6:F1} cm";
+
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        var viewModel = _connectionViewModel;
+                        if (viewModel == null)
+                        {
+                            return;
+                        }
+
+                        viewModel.UpdatePhoneTracking(text, rate);
+
+                        if (_poseRouter != null)
+                        {
+                            viewModel.DirectOutputStatus = _poseRouter.Status;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[DesktopApp] Error updating phone tracking status: {ex.Message}");
+                    }
+                });
             };
 
             httpServer.FrameReceived += (sender, frameData) =>
@@ -933,6 +1037,16 @@ namespace EDSC.Desktop
                             var viewModel = _connectionViewModel;
                             if (viewModel == null)
                             {
+                                return;
+                            }
+
+                            if (!viewModel.ShowPcPreview)
+                            {
+                                // Keep the status line alive without decoding the frame
+                                viewModel.UpdateVideoFrame(null, 0, null, preserveStatus: true);
+                                viewModel.ShowVideoPreview = true;
+                                viewModel.VideoStatusText = _faceTrackingService?.LastStatus ?? "Tracking (preview off)";
+                                viewModel.VideoFps = httpServer.GetCurrentFps().ToString("F1");
                                 return;
                             }
 

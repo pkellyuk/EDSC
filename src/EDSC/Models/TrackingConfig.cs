@@ -27,5 +27,11 @@ namespace EDSC.Models
         /// </summary>
         [JsonPropertyName("directOutput")]
         public bool DirectOutput { get; set; } = false;
+
+        /// <summary>
+        /// Show the camera preview in the desktop app. Off saves CPU on the PC and, in phone-tracking mode, on the phone.
+        /// </summary>
+        [JsonPropertyName("showPreview")]
+        public bool ShowPreview { get; set; } = true;
     }
 }

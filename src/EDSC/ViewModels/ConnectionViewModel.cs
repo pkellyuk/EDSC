@@ -31,6 +31,9 @@ namespace EDSC.ViewModels
         private double _rollScale;
         private double _smoothingStrength;
 
+        // Preview toggle
+        private bool _showPcPreview = true;
+
         // Pose output properties
         private bool _directOutputEnabled;
         private string _directOutputStatus;
@@ -188,6 +191,29 @@ namespace EDSC.ViewModels
             }
         }
 
+        private bool _hasVideoFrame;
+
+        /// <summary>
+        /// True while actual video frames are arriving; false when only poses arrive from the phone.
+        /// </summary>
+        public bool HasVideoFrame
+        {
+            get
+            {
+                return _hasVideoFrame;
+            }
+            set
+            {
+                if (_hasVideoFrame == value)
+                {
+                    return;
+                }
+
+                _hasVideoFrame = value;
+                OnPropertyChanged(nameof(HasVideoFrame));
+            }
+        }
+
         public Bitmap? VideoFrameImage
         {
             get
@@ -337,6 +363,27 @@ namespace EDSC.ViewModels
 
                 _smoothingStrength = value;
                 OnPropertyChanged(nameof(SmoothingStrength));
+            }
+        }
+
+        /// <summary>
+        /// True to decode and show camera frames in the desktop preview panel.
+        /// </summary>
+        public bool ShowPcPreview
+        {
+            get
+            {
+                return _showPcPreview;
+            }
+            set
+            {
+                if (_showPcPreview == value)
+                {
+                    return;
+                }
+
+                _showPcPreview = value;
+                OnPropertyChanged(nameof(ShowPcPreview));
             }
         }
 
@@ -533,24 +580,49 @@ namespace EDSC.ViewModels
             }
         }
 
-        public void UpdateVideoFrame(Bitmap? frameImage, double fps, string? trackingStatus = null)
+        /// <param name="frameImage">Frame to show.</param>
+        /// <param name="fps">Frame rate to display.</param>
+        /// <param name="trackingStatus">Status line to show, or null for the default.</param>
+        /// <param name="preserveStatus">True to update only the image, leaving the status line and rate alone.</param>
+        public void UpdateVideoFrame(Bitmap? frameImage, double fps, string? trackingStatus = null, bool preserveStatus = false)
         {
             VideoFrameImage = frameImage;
-            VideoFps = fps.ToString("F1");
+            HasVideoFrame = frameImage != null;
 
-            if (frameImage != null)
+            if (frameImage == null)
             {
-                ShowVideoPreview = true;
-                VideoStatusText = string.IsNullOrEmpty(trackingStatus)
-                    ? "Receiving video stream"
-                    : trackingStatus;
+                return;
             }
+
+            ShowVideoPreview = true;
+
+            if (preserveStatus)
+            {
+                return;
+            }
+
+            VideoFps = fps.ToString("F1");
+            VideoStatusText = string.IsNullOrEmpty(trackingStatus)
+                ? "Receiving video stream"
+                : trackingStatus;
+        }
+
+        /// <summary>
+        /// Show the tracking panel with pose numbers, for poses computed on the phone.
+        /// Any preview image already showing is left in place.
+        /// </summary>
+        public void UpdatePhoneTracking(string status, double posesPerSecond)
+        {
+            VideoFps = posesPerSecond.ToString("F1");
+            VideoStatusText = string.IsNullOrEmpty(status) ? "Phone tracking" : status;
+            ShowVideoPreview = true;
         }
 
         public void HideVideoPreview()
         {
             ShowVideoPreview = false;
             VideoFrameImage = null;
+            HasVideoFrame = false;
             VideoFps = "0.0";
             VideoStatusText = "Waiting for video stream...";
         }

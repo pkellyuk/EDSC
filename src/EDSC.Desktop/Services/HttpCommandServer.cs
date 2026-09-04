@@ -28,6 +28,9 @@ namespace EDSC.Desktop.Services
         private readonly object _configLock = new object();
         private AppConfig? _currentConfig;
 
+        // Changes on every server start; the page compares it and reloads itself to pick up new scripts
+        private static readonly string PageStamp = Guid.NewGuid().ToString("N");
+
         // Video streaming state
         private const int MaxFrameBytes = 4 * 1024 * 1024;
         private byte[]? _latestFrame;
@@ -47,6 +50,11 @@ namespace EDSC.Desktop.Services
         public bool IsRunning { get; private set; }
 
         /// <summary>
+        /// False to drop phone preview images and tell the phone to stop sending them
+        /// </summary>
+        public bool PreviewEnabled { get; set; } = true;
+
+        /// <summary>
         /// Event fired when a new video frame is received
         /// </summary>
         public event EventHandler<byte[]>? FrameReceived;
@@ -60,6 +68,21 @@ namespace EDSC.Desktop.Services
         /// Event fired when a frame was processed but no pose could be produced
         /// </summary>
         public event EventHandler? PoseLost;
+
+        /// <summary>
+        /// Event fired for each pose computed on the phone (null when the phone reports the face lost)
+        /// </summary>
+        public event EventHandler<HeadPose?>? PhonePoseReceived;
+
+        /// <summary>
+        /// Event fired when the phone sends a low-rate preview image (with its overlay baked in) alongside poses
+        /// </summary>
+        public event EventHandler<byte[]>? PreviewFrameReceived;
+
+        // Phone pose rate
+        private int _phonePoseCount;
+        private DateTime _phonePoseWindowStart = DateTime.MinValue;
+        private double _phonePoseRate;
 
         public HttpCommandServer(
             IKeyboardService keyboardService,
@@ -230,6 +253,10 @@ namespace EDSC.Desktop.Services
                                 {
                                     await HandleConfigGet(context);
                                 }
+                                else if (context.Request.Path == "/config/version" && context.Request.Method == "GET")
+                                {
+                                    await HandleConfigVersionGet(context);
+                                }
                                 else if (context.Request.Path == "/web" && context.Request.Method == "GET")
                                 {
                                     await HandleWebUiRequest(context);
@@ -244,7 +271,11 @@ namespace EDSC.Desktop.Services
                                 }
                                 else if (context.Request.Path == "/video" && context.WebSockets.IsWebSocketRequest)
                                 {
-                                                                        await HandleVideoWebSocket(context);
+                                    await HandleVideoWebSocket(context);
+                                }
+                                else if (context.Request.Path == "/pose" && context.WebSockets.IsWebSocketRequest)
+                                {
+                                    await HandlePoseWebSocket(context);
                                 }
                                 else
                                 {
@@ -315,17 +346,68 @@ namespace EDSC.Desktop.Services
                 return;
             }
 
+            // Re-read from disk so edits made in the desktop editor are served on the next reload
             AppConfig configToReturn;
-
-            lock (_configLock)
+            try
             {
-                configToReturn = _currentConfig ?? new AppConfig();
+                var fresh = await _configService.LoadConfigurationAsync();
+                lock (_configLock)
+                {
+                    if (fresh != null)
+                    {
+                        _currentConfig = fresh;
+                    }
+                    configToReturn = _currentConfig ?? new AppConfig();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HttpCommandServer] Config reload failed, serving cached copy: {ex.Message}");
+                lock (_configLock)
+                {
+                    configToReturn = _currentConfig ?? new AppConfig();
+                }
             }
 
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonSerializer.Serialize(configToReturn));
 
             Debug.WriteLine("[HttpCommandServer] Exit: HandleConfigGet");
+        }
+
+        /// <summary>
+        /// Cheap stamp the phone polls to learn that the layout changed
+        /// </summary>
+        private async Task HandleConfigVersionGet(HttpContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            AppConfig config;
+            try
+            {
+                config = await _configService.LoadConfigurationAsync() ?? new AppConfig();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HttpCommandServer] Config version read failed: {ex.Message}");
+                lock (_configLock)
+                {
+                    config = _currentConfig ?? new AppConfig();
+                }
+            }
+
+            context.Response.ContentType = "application/json";
+            context.Response.Headers["Cache-Control"] = "no-store";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+            {
+                version = config.ConfigVersion,
+                updatedUtc = config.LastUpdatedUtc,
+                page = PageStamp,
+                preview = PreviewEnabled
+            }));
         }
 
         private async Task HandleWebUiRequest(HttpContext context)
@@ -339,7 +421,8 @@ namespace EDSC.Desktop.Services
             }
 
             context.Response.ContentType = "text/html; charset=utf-8";
-            await context.Response.WriteAsync(GetWebUiHtml());
+            context.Response.Headers["Cache-Control"] = "no-store";
+            await context.Response.WriteAsync(GetWebUiHtml().Replace("__EDSC_PAGE_STAMP__", PageStamp));
 
             Debug.WriteLine("[HttpCommandServer] Exit: HandleWebUiRequest");
         }
@@ -520,15 +603,63 @@ namespace EDSC.Desktop.Services
       font-size: 13px;
       font-weight: 600;
     }
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      line-height: 0;
+    }
     #videoCanvas {
       width: 100%;
       height: auto;
       border-radius: 8px;
       background: #000;
     }
+    #overlayCanvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    #videoPreview {
+      display: none;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      background: #000;
+    }
+    .video-wrap.phone #videoPreview {
+      display: block;
+    }
+    .video-wrap.phone #videoCanvas {
+      display: none;
+    }
+    .tracking-mode {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+    .tracking-mode input {
+      width: 18px;
+      height: 18px;
+    }
+    .pose-readout {
+      margin-top: 8px;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre;
+      line-height: 1.5;
+    }
     .tracking-btn.active {
       background: #DC2626;
       border-color: #EF4444;
+    }
+    .btn.unbound {
+      opacity: 0.4;
     }
   </style>
 </head>
@@ -545,13 +676,21 @@ namespace EDSC.Desktop.Services
       <button id=""voiceBtn"" class=""voice-btn"">🎤 Voice</button>
       <button id=""trackingBtn"" class=""tracking-btn"">📹 Face Tracking</button>
     </div>
+    <label class=""tracking-mode"">
+      <input type=""checkbox"" id=""phoneModeToggle"">
+      <span>Track on phone (MediaPipe) - sends pose only, no video</span>
+    </label>
     <div id=""trackingPanel"" class=""tracking-panel"" style=""display:none;"">
       <div class=""tracking-status"">
         <span id=""trackingStatusText"">Ready</span>
         <span id=""trackingFps"">0 FPS</span>
       </div>
-      <canvas id=""videoCanvas"" width=""480"" height=""360""></canvas>
-      <video id=""videoPreview"" autoplay playsinline style=""display:none;""></video>
+      <div class=""video-wrap"" id=""videoWrap"">
+        <canvas id=""videoCanvas"" width=""480"" height=""360""></canvas>
+        <video id=""videoPreview"" autoplay playsinline muted></video>
+        <canvas id=""overlayCanvas"" width=""480"" height=""360""></canvas>
+      </div>
+      <div id=""poseReadout"" class=""pose-readout"" style=""display:none;""></div>
     </div>
     <div id=""voiceFeedback"" class=""voice-feedback"" style=""display:none;"">
       <div class=""voice-status"">
@@ -970,12 +1109,61 @@ namespace EDSC.Desktop.Services
       }
     }
 
+    // The desktop editor bumps the config version on save; poll it so the layout follows without a manual reload.
+    // The same poll carries a stamp that changes when the PC app restarts, so a new page script is picked up
+    // automatically and tracking resumes by itself.
+    const PAGE_STAMP = '__EDSC_PAGE_STAMP__';
+    const RESUME_KEY = 'edsc.resumeTracking';
+    let configStamp = null;
+    let reloading = false;
+
+    async function checkConfigVersion() {
+      if (reloading) {
+        return;
+      }
+      try {
+        const res = await fetch('/config/version', { cache: 'no-store' });
+        if (!res.ok) {
+          return;
+        }
+        const v = await res.json();
+
+        if (v.page && v.page !== PAGE_STAMP) {
+          console.log('[Config] PC app restarted with a new page, reloading');
+          reloading = true;
+          try {
+            if (tracking.isActive) {
+              sessionStorage.setItem(RESUME_KEY, '1');
+            }
+          } catch (e) {
+            // Storage unavailable; tracking just will not auto-resume
+          }
+          location.reload();
+          return;
+        }
+
+        if (typeof v.preview === 'boolean') {
+          previewWanted = v.preview;
+        }
+
+        const stamp = String(v.version) + ':' + String(v.updatedUtc);
+        if (configStamp !== null && stamp !== configStamp) {
+          console.log('[Config] Layout changed on the PC, reloading');
+          await loadConfig();
+        }
+      } catch (err) {
+        // Server unreachable for the moment; try again next tick
+      }
+    }
+    setInterval(checkConfigVersion, 3000);
+
     async function loadConfig() {
       statusEl.textContent = 'Loading buttons...';
       gridEl.innerHTML = '';
       try {
-        const res = await fetch('/config');
+        const res = await fetch('/config', { cache: 'no-store' });
         const config = await res.json();
+        configStamp = String(config.configVersion) + ':' + String(config.lastUpdatedUtc);
         const buttons = (config && config.buttons) ? config.buttons : [];
         if (!buttons.length) {
           statusEl.textContent = 'No buttons configured.';
@@ -1010,6 +1198,10 @@ namespace EDSC.Desktop.Services
             const buttonSize = (button.size || 80) * 1.6;
             btn.style.width = buttonSize + 'px';
             btn.style.height = buttonSize + 'px';
+            if (!button.key) {
+              btn.classList.add('unbound');
+              btn.title = 'No keyboard key bound for this action in Elite Dangerous';
+            }
             const iconWrap = document.createElement('div');
             iconWrap.className = 'icon';
             if (button.iconSvg) {
@@ -1024,7 +1216,7 @@ namespace EDSC.Desktop.Services
             label.textContent = button.label || button.id;
 
             const key = document.createElement('small');
-            key.textContent = button.key || '';
+            key.textContent = button.key || 'not bound';
 
             btn.appendChild(iconWrap);
             btn.appendChild(label);
@@ -1103,32 +1295,354 @@ namespace EDSC.Desktop.Services
       video: null,
       canvas: null,
       ctx: null,
+      overlay: null,
+      overlayCtx: null,
       frameInterval: null,
       fps: 0,
       frameCount: 0,
-      lastFpsUpdate: Date.now()
+      lastFpsUpdate: Date.now(),
+      phoneMode: false
     };
+
+    // On-phone tracking with MediaPipe Face Landmarker: the browser runs the model and
+    // sends only a pose to the PC, so no video crosses the network.
+    const MEDIAPIPE_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+    const MEDIAPIPE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+    const PHONE_MODE_KEY = 'edsc.trackOnPhone';
+    const phoneTracker = {
+      vision: null,
+      landmarker: null,
+      delegate: '',
+      loading: null,
+      raf: null,
+      vfc: null,
+      lastVideoTime: -1,
+      lostSent: false,
+      inferMs: 0
+    };
+
+    function setTrackingStatus(text) {
+      document.getElementById('trackingStatusText').textContent = text;
+    }
+
+    function isPhoneMode() {
+      const toggle = document.getElementById('phoneModeToggle');
+      return !!(toggle && toggle.checked);
+    }
 
     function initTracking() {
       tracking.video = document.getElementById('videoPreview');
       tracking.canvas = document.getElementById('videoCanvas');
-      tracking.ctx = tracking.canvas.getContext('2d');
+      tracking.ctx = tracking.canvas.getContext('2d', { willReadFrequently: true });
+      tracking.overlay = document.getElementById('overlayCanvas');
+      tracking.overlayCtx = tracking.overlay.getContext('2d');
+
+      const toggle = document.getElementById('phoneModeToggle');
+      if (toggle) {
+        // On-phone tracking is the default; only an explicit opt-out turns it off
+        try {
+          toggle.checked = localStorage.getItem(PHONE_MODE_KEY) !== '0';
+        } catch (e) {
+          toggle.checked = true;
+        }
+        toggle.addEventListener('change', () => {
+          try {
+            localStorage.setItem(PHONE_MODE_KEY, toggle.checked ? '1' : '0');
+          } catch (e) {
+            // Storage unavailable; the choice just will not persist
+          }
+          if (tracking.isActive) {
+            stopTracking(true);
+            startTracking();
+          }
+        });
+      }
+    }
+
+    async function loadMediaPipe() {
+      if (phoneTracker.landmarker) {
+        return phoneTracker.landmarker;
+      }
+
+      if (!phoneTracker.loading) {
+        phoneTracker.loading = (async () => {
+          setTrackingStatus('Loading MediaPipe...');
+          const vision = await import(MEDIAPIPE_BASE + '/vision_bundle.mjs');
+          const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_BASE + '/wasm');
+
+          const makeOptions = (delegate) => ({
+            baseOptions: { modelAssetPath: MEDIAPIPE_MODEL, delegate: delegate },
+            runningMode: 'VIDEO',
+            numFaces: 1,
+            outputFaceBlendshapes: false,
+            outputFacialTransformationMatrixes: true
+          });
+
+          let landmarker;
+          try {
+            landmarker = await vision.FaceLandmarker.createFromOptions(fileset, makeOptions('GPU'));
+            phoneTracker.delegate = 'GPU';
+            console.log('[Phone tracking] MediaPipe running on GPU');
+          } catch (gpuError) {
+            console.warn('[Phone tracking] GPU delegate failed, falling back to CPU:', gpuError);
+            landmarker = await vision.FaceLandmarker.createFromOptions(fileset, makeOptions('CPU'));
+            phoneTracker.delegate = 'CPU';
+          }
+
+          phoneTracker.vision = vision;
+          phoneTracker.landmarker = landmarker;
+          return landmarker;
+        })().catch((err) => {
+          phoneTracker.loading = null;
+          throw err;
+        });
+      }
+
+      return phoneTracker.loading;
+    }
+
+    // MediaPipe gives a column-major 4x4 transform from canonical face space to camera space,
+    // x right, y up, z toward the viewer, translation in centimetres. Convert to the same
+    // convention the PC tracker uses: yaw + toward image-right, pitch + up, roll + when the
+    // image-right side of the face drops, z + away from the camera.
+    function poseFromMatrix(d) {
+      const RAD2DEG = 180 / Math.PI;
+      const fx = d[8], fy = d[9], fz = d[10];   // third column: face forward
+      const rx = d[0], ry = d[1];               // first column: face right
+      const clampUnit = (v) => Math.max(-1, Math.min(1, v));
+      return {
+        yaw: Math.atan2(fx, fz) * RAD2DEG,
+        pitch: Math.asin(clampUnit(fy)) * RAD2DEG,
+        roll: Math.atan2(-ry, rx) * RAD2DEG,
+        x: d[12],
+        y: d[13],
+        z: -d[14]
+      };
+    }
+
+    // One path per group and a single stroke: thousands of individual strokes per frame
+    // is what makes the stock drawing helper slow on phones.
+    function strokeConnections(ctx, landmarks, connections, color, lineWidth, w, h) {
+      ctx.beginPath();
+      for (let i = 0; i < connections.length; i++) {
+        const a = landmarks[connections[i].start];
+        const b = landmarks[connections[i].end];
+        if (!a || !b) {
+          continue;
+        }
+        ctx.moveTo(a.x * w, a.y * h);
+        ctx.lineTo(b.x * w, b.y * h);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+
+    function drawFaceMesh(landmarks) {
+      const ctx = tracking.overlayCtx;
+      const vision = phoneTracker.vision;
+      if (!ctx || !vision) {
+        return;
+      }
+
+      const w = tracking.overlay.width;
+      const h = tracking.overlay.height;
+      const FL = vision.FaceLandmarker;
+
+      ctx.clearRect(0, 0, w, h);
+      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_TESSELATION, 'rgba(76, 175, 80, 0.35)', 0.6, w, h);
+      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_FACE_OVAL, '#4caf50', 1.5, w, h);
+      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_LEFT_EYE, '#60a5fa', 1.2, w, h);
+      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_RIGHT_EYE, '#60a5fa', 1.2, w, h);
+      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_LIPS, '#f87171', 1.2, w, h);
+    }
+
+    function sendPhoneMessage(obj) {
+      if (tracking.ws && tracking.ws.readyState === WebSocket.OPEN) {
+        tracking.ws.send(JSON.stringify(obj));
+      }
+    }
+
+    // Low-rate preview for the desktop panel: video plus the mesh overlay, small and cheap.
+    const PREVIEW_INTERVAL_MS = 150;
+    const PREVIEW_WIDTH = 320;
+    const previewCanvas = document.createElement('canvas');
+    let previewLastSent = 0;
+    let previewBusy = false;
+    let previewWanted = true;   // the PC can switch this off via the version poll
+
+    function sendPhonePreview(video, w, h) {
+      if (!previewWanted) {
+        return;
+      }
+      const now = Date.now();
+      if (previewBusy || now - previewLastSent < PREVIEW_INTERVAL_MS) {
+        return;
+      }
+      if (!tracking.ws || tracking.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      previewLastSent = now;
+
+      const pw = PREVIEW_WIDTH;
+      const ph = Math.max(1, Math.round(PREVIEW_WIDTH * h / w));
+      if (previewCanvas.width !== pw || previewCanvas.height !== ph) {
+        previewCanvas.width = pw;
+        previewCanvas.height = ph;
+      }
+
+      const ctx = previewCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, pw, ph);
+      ctx.drawImage(tracking.overlay, 0, 0, pw, ph);
+
+      previewBusy = true;
+      previewCanvas.toBlob((blob) => {
+        previewBusy = false;
+        if (!blob || !tracking.ws || tracking.ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        blob.arrayBuffer().then((buffer) => {
+          if (tracking.ws && tracking.ws.readyState === WebSocket.OPEN) {
+            tracking.ws.send(buffer);
+          }
+        });
+      }, 'image/jpeg', 0.5);
+    }
+
+    function updatePhoneFps() {
+      tracking.frameCount++;
+      const now = Date.now();
+      const elapsed = (now - tracking.lastFpsUpdate) / 1000;
+      if (elapsed >= 1.0) {
+        tracking.fps = tracking.frameCount / elapsed;
+        document.getElementById('trackingFps').textContent = tracking.fps.toFixed(1) + ' FPS';
+        tracking.frameCount = 0;
+        tracking.lastFpsUpdate = now;
+      }
+    }
+
+    // Schedule the next phone-tracking step. requestVideoFrameCallback fires once per camera
+    // frame where supported; otherwise fall back to requestAnimationFrame with a frame check.
+    function schedulePhoneFrame() {
+      const video = tracking.video;
+      if (video && typeof video.requestVideoFrameCallback === 'function') {
+        phoneTracker.vfc = video.requestVideoFrameCallback(() => {
+          phoneTracker.vfc = null;
+          phoneTrackingStep(true);
+        });
+      } else {
+        phoneTracker.raf = requestAnimationFrame(() => {
+          phoneTracker.raf = null;
+          phoneTrackingStep(false);
+        });
+      }
+    }
+
+    function phoneTrackingStep(isNewFrame) {
+      if (!tracking.isActive || !tracking.phoneMode) {
+        return;
+      }
+
+      schedulePhoneFrame();
+
+      const video = tracking.video;
+      const landmarker = phoneTracker.landmarker;
+      if (!video || !landmarker || video.readyState < 2) {
+        return;
+      }
+
+      if (!isNewFrame) {
+        // rAF path: only run inference when the camera has produced a new frame
+        if (video.currentTime === phoneTracker.lastVideoTime) {
+          return;
+        }
+        phoneTracker.lastVideoTime = video.currentTime;
+      }
+
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (w === 0 || h === 0) {
+        return;
+      }
+
+      if (tracking.overlay.width !== w || tracking.overlay.height !== h) {
+        tracking.overlay.width = w;
+        tracking.overlay.height = h;
+      }
+
+      // Hand the video element straight to MediaPipe: it uploads the frame as a GPU texture,
+      // with no intermediate 2D canvas copy.
+      let result;
+      const t0 = performance.now();
+      try {
+        result = landmarker.detectForVideo(video, t0);
+      } catch (err) {
+        console.error('[Phone tracking] detect failed:', err);
+        setTrackingStatus('Detect error: ' + err.message);
+        return;
+      }
+      phoneTracker.inferMs = phoneTracker.inferMs * 0.9 + (performance.now() - t0) * 0.1;
+
+      const readout = document.getElementById('poseReadout');
+      const faces = result && result.faceLandmarks ? result.faceLandmarks : [];
+      const matrices = result && result.facialTransformationMatrixes ? result.facialTransformationMatrixes : [];
+
+      if (faces.length > 0 && matrices.length > 0) {
+        const pose = poseFromMatrix(matrices[0].data);
+        sendPhoneMessage({ t: 'pose', yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll, x: pose.x, y: pose.y, z: pose.z });
+        phoneTracker.lostSent = false;
+        updatePhoneFps();
+        drawFaceMesh(faces[0]);
+        sendPhonePreview(video, w, h);
+
+        if (readout) {
+          readout.textContent =
+            'yaw ' + pose.yaw.toFixed(1).padStart(6) + '°   pitch ' + pose.pitch.toFixed(1).padStart(6) + '°   roll ' + pose.roll.toFixed(1).padStart(6) + '°\n' +
+            'x   ' + pose.x.toFixed(1).padStart(6) + 'cm  y     ' + pose.y.toFixed(1).padStart(6) + 'cm  z    ' + pose.z.toFixed(1).padStart(6) + 'cm\n' +
+            'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + '  ' + w + 'x' + h;
+        }
+        setTrackingStatus('Tracking on phone');
+      } else {
+        tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+        sendPhonePreview(video, w, h);
+        if (!phoneTracker.lostSent) {
+          sendPhoneMessage({ t: 'lost' });
+          phoneTracker.lostSent = true;
+        }
+        if (readout) {
+          readout.textContent = 'No face detected\ninfer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate;
+        }
+        setTrackingStatus('Tracking on phone - no face');
+      }
     }
 
     async function startTracking() {
       console.log('[Tracking] Starting face tracking...');
+      tracking.phoneMode = isPhoneMode();
+
+      document.getElementById('trackingPanel').style.display = 'block';
+      document.getElementById('trackingBtn').classList.add('active');
+      document.getElementById('trackingBtn').textContent = '⏹ Stop Tracking';
+      document.getElementById('poseReadout').style.display = tracking.phoneMode ? 'block' : 'none';
+      document.getElementById('videoWrap').classList.toggle('phone', tracking.phoneMode);
+      tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
 
       try {
+        if (tracking.phoneMode) {
+          await loadMediaPipe();
+        }
+
         // Get camera access
         const constraints = {
           video: {
-            width: { ideal: 480 },
-            height: { ideal: 360 },
+            width: { ideal: tracking.phoneMode ? 640 : 480 },
+            height: { ideal: tracking.phoneMode ? 480 : 360 },
             frameRate: { ideal: 30 },
             facingMode: 'user'
           }
         };
 
+        setTrackingStatus('Starting camera...');
         tracking.stream = await navigator.mediaDevices.getUserMedia(constraints);
         tracking.video.srcObject = tracking.stream;
 
@@ -1136,24 +1650,33 @@ namespace EDSC.Desktop.Services
 
         console.log('[Tracking] Camera started');
 
-        // Connect WebSocket
+        // Connect WebSocket: JPEG frames to /video, or poses to /pose
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/video`;
+        const wsUrl = `${protocol}//${window.location.host}/` + (tracking.phoneMode ? 'pose' : 'video');
 
         tracking.ws = new WebSocket(wsUrl);
         tracking.ws.binaryType = 'arraybuffer';
 
         tracking.ws.onopen = () => {
           console.log('[Tracking] WebSocket connected');
-          document.getElementById('trackingStatusText').textContent = 'Streaming';
+          tracking.frameCount = 0;
+          tracking.lastFpsUpdate = Date.now();
 
-          // Start capturing and sending frames
-          tracking.frameInterval = setInterval(captureAndSendFrame, 33); // ~30 FPS
+          if (tracking.phoneMode) {
+            setTrackingStatus('Tracking on phone');
+            phoneTracker.lastVideoTime = -1;
+            phoneTracker.lostSent = false;
+            phoneTracker.inferMs = 0;
+            schedulePhoneFrame();
+          } else {
+            setTrackingStatus('Streaming');
+            tracking.frameInterval = setInterval(captureAndSendFrame, 33); // ~30 FPS
+          }
         };
 
         tracking.ws.onerror = (error) => {
           console.error('[Tracking] WebSocket error:', error);
-          document.getElementById('trackingStatusText').textContent = 'Connection error';
+          setTrackingStatus('Connection error');
         };
 
         tracking.ws.onclose = () => {
@@ -1162,14 +1685,13 @@ namespace EDSC.Desktop.Services
         };
 
         tracking.isActive = true;
-        document.getElementById('trackingPanel').style.display = 'block';
-        document.getElementById('trackingBtn').classList.add('active');
-        document.getElementById('trackingBtn').textContent = '⏹ Stop Tracking';
 
       } catch (error) {
         console.error('[Tracking] Error starting:', error);
-        document.getElementById('trackingStatusText').textContent = 'Error: ' + error.message;
-        stopTracking();
+        const message = error && error.message ? error.message : String(error);
+        stopTracking(true);
+        document.getElementById('trackingPanel').style.display = 'block';
+        setTrackingStatus('Error: ' + message);
       }
     }
 
@@ -1217,7 +1739,7 @@ namespace EDSC.Desktop.Services
       }, 'image/jpeg', 0.6);
     }
 
-    function stopTracking() {
+    function stopTracking(keepPanelOpen) {
       console.log('[Tracking] Stopping...');
 
       tracking.isActive = false;
@@ -1227,9 +1749,30 @@ namespace EDSC.Desktop.Services
         tracking.frameInterval = null;
       }
 
+      if (phoneTracker.raf) {
+        cancelAnimationFrame(phoneTracker.raf);
+        phoneTracker.raf = null;
+      }
+
+      if (phoneTracker.vfc && tracking.video && typeof tracking.video.cancelVideoFrameCallback === 'function') {
+        tracking.video.cancelVideoFrameCallback(phoneTracker.vfc);
+      }
+      phoneTracker.vfc = null;
+
+      const wrap = document.getElementById('videoWrap');
+      if (wrap) {
+        wrap.classList.remove('phone');
+      }
+
+      if (tracking.overlayCtx && tracking.overlay) {
+        tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+      }
+
       if (tracking.ws) {
-        tracking.ws.close();
+        const ws = tracking.ws;
         tracking.ws = null;
+        ws.onclose = null;
+        ws.close();
       }
 
       if (tracking.stream) {
@@ -1241,11 +1784,14 @@ namespace EDSC.Desktop.Services
         tracking.video.srcObject = null;
       }
 
-      document.getElementById('trackingPanel').style.display = 'none';
+      if (!keepPanelOpen) {
+        document.getElementById('trackingPanel').style.display = 'none';
+      }
       document.getElementById('trackingBtn').classList.remove('active');
       document.getElementById('trackingBtn').textContent = '📹 Face Tracking';
       document.getElementById('trackingStatusText').textContent = 'Ready';
       document.getElementById('trackingFps').textContent = '0 FPS';
+      document.getElementById('poseReadout').style.display = 'none';
     }
 
     function toggleTracking() {
@@ -1266,6 +1812,17 @@ namespace EDSC.Desktop.Services
     }
 
     loadConfig();
+
+    // Resume tracking after a self-triggered reload; camera permission is already granted on this origin
+    try {
+      if (sessionStorage.getItem(RESUME_KEY) === '1') {
+        sessionStorage.removeItem(RESUME_KEY);
+        console.log('[Tracking] Resuming after page reload');
+        setTimeout(startTracking, 500);
+      }
+    } catch (e) {
+      // Storage unavailable
+    }
   </script>
 </body>
 </html>";
@@ -1501,6 +2058,217 @@ namespace EDSC.Desktop.Services
             }
 
             Debug.WriteLine("[HttpCommandServer] Exit: HandleVideoWebSocket");
+        }
+
+        /// <summary>
+        /// Receives poses computed on the phone by MediaPipe as small JSON text messages:
+        /// {"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..} or {"t":"lost"}.
+        /// Angles in degrees, translation in centimetres, same conventions as the PC tracker.
+        /// </summary>
+        private async Task HandlePoseWebSocket(HttpContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            WebSocket? webSocket = null;
+            const int MaxPoseMessageBytes = 512 * 1024;   // poses are tiny; preview JPEGs are a few tens of KB
+
+            try
+            {
+                webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                Console.WriteLine("[HttpCommandServer] Pose WebSocket connection established");
+
+                var chunk = new byte[16 * 1024];
+                var message = new MemoryStream();
+
+                lock (_frameLock)
+                {
+                    _phonePoseCount = 0;
+                    _phonePoseWindowStart = DateTime.UtcNow;
+                    _phonePoseRate = 0;
+                }
+
+                while (webSocket.State == WebSocketState.Open)
+                {
+                    message.SetLength(0);
+                    WebSocketReceiveResult result;
+
+                    do
+                    {
+                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(chunk), CancellationToken.None);
+
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            break;
+                        }
+
+                        if (message.Length + result.Count > MaxPoseMessageBytes)
+                        {
+                            throw new InvalidOperationException($"Pose message exceeds {MaxPoseMessageBytes} bytes");
+                        }
+
+                        message.Write(chunk, 0, result.Count);
+                    }
+                    while (!result.EndOfMessage);
+
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        Console.WriteLine("[HttpCommandServer] Pose WebSocket close requested");
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                        break;
+                    }
+
+                    if (message.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    // Binary on this socket is a preview image for the desktop panel
+                    if (result.MessageType == WebSocketMessageType.Binary)
+                    {
+                        if (!PreviewEnabled)
+                        {
+                            continue;
+                        }
+
+                        var preview = message.ToArray();
+                        lock (_frameLock)
+                        {
+                            _latestFrame = preview;
+                        }
+                        PreviewFrameReceived?.Invoke(this, preview);
+                        continue;
+                    }
+
+                    if (result.MessageType != WebSocketMessageType.Text)
+                    {
+                        continue;
+                    }
+
+                    var pose = ParsePhonePose(message.GetBuffer(), (int)message.Length, out bool lost);
+
+                    if (lost)
+                    {
+                        PhonePoseReceived?.Invoke(this, null);
+                        PoseLost?.Invoke(this, EventArgs.Empty);
+                        continue;
+                    }
+
+                    if (pose == null)
+                    {
+                        continue;
+                    }
+
+                    lock (_frameLock)
+                    {
+                        _phonePoseCount++;
+                        var elapsed = (DateTime.UtcNow - _phonePoseWindowStart).TotalSeconds;
+                        if (elapsed >= 1.0)
+                        {
+                            _phonePoseRate = _phonePoseCount / elapsed;
+                            _phonePoseCount = 0;
+                            _phonePoseWindowStart = DateTime.UtcNow;
+                        }
+                    }
+
+                    PhonePoseReceived?.Invoke(this, pose);
+
+                    if (_poseOutput != null)
+                    {
+                        await _poseOutput.SendPoseAsync(pose);
+                    }
+                }
+
+                Console.WriteLine("[HttpCommandServer] Pose WebSocket connection closed");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HttpCommandServer] Pose WebSocket error: {ex.Message}");
+
+                if (webSocket != null && webSocket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await webSocket.CloseAsync(WebSocketCloseStatus.InternalServerError, ex.Message, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // Ignore close errors
+                    }
+                }
+            }
+            finally
+            {
+                PhonePoseReceived?.Invoke(this, null);
+                PoseLost?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private static HeadPose? ParsePhonePose(byte[] buffer, int length, out bool lost)
+        {
+            lost = false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(new ReadOnlyMemory<byte>(buffer, 0, length));
+                var root = document.RootElement;
+
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    return null;
+                }
+
+                if (root.TryGetProperty("t", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "lost")
+                {
+                    lost = true;
+                    return null;
+                }
+
+                double Read(string name)
+                {
+                    if (root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var d))
+                    {
+                        return d;
+                    }
+
+                    return double.NaN;
+                }
+
+                var pose = new HeadPose
+                {
+                    Yaw = Read("yaw"),
+                    Pitch = Read("pitch"),
+                    Roll = Read("roll"),
+                    X = Read("x"),
+                    Y = Read("y"),
+                    Z = Read("z")
+                };
+
+                if (double.IsNaN(pose.Yaw) || double.IsNaN(pose.Pitch) || double.IsNaN(pose.Roll)
+                    || double.IsNaN(pose.X) || double.IsNaN(pose.Y) || double.IsNaN(pose.Z))
+                {
+                    return null;
+                }
+
+                return pose;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Poses per second arriving from the phone
+        /// </summary>
+        public double GetPhonePoseRate()
+        {
+            lock (_frameLock)
+            {
+                return _phonePoseRate;
+            }
         }
 
         /// <summary>

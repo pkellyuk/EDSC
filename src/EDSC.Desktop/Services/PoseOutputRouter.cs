@@ -40,6 +40,36 @@ namespace EDSC.Desktop.Services
             ApplySmoothing();
         }
 
+        /// <summary>Sensitivity scales. All poses reach the router unscaled; gain is applied here, after centring.</summary>
+        public double TranslationScale { get; set; } = 1.0;
+        public double YawScale { get; set; } = 1.0;
+        public double PitchScale { get; set; } = 1.0;
+        public double RollScale { get; set; } = 1.0;
+
+        /// <summary>
+        /// Apply the sensitivity scales. The PC tracker scales its own output, so this is only
+        /// for poses computed elsewhere.
+        /// </summary>
+        public HeadPose ApplyScales(HeadPose pose)
+        {
+            if (pose == null)
+            {
+                throw new ArgumentNullException(nameof(pose));
+            }
+
+            return new HeadPose
+            {
+                X = pose.X * TranslationScale,
+                Y = pose.Y * TranslationScale,
+                Z = pose.Z * TranslationScale,
+                Yaw = pose.Yaw * YawScale,
+                Pitch = pose.Pitch * PitchScale,
+                Roll = pose.Roll * RollScale,
+                FaceBox = pose.FaceBox,
+                Landmarks = pose.Landmarks
+            };
+        }
+
         /// <summary>
         /// 0 = no extra filtering, 0.95 = heaviest. Shares the tracking Smoothing slider.
         /// </summary>
@@ -194,11 +224,12 @@ namespace EDSC.Desktop.Services
                 center = _center;
             }
 
+            // Poses arrive unscaled. Opentrack centres and maps for itself, so it gets the scaled absolute pose.
             if (!direct)
             {
                 if (_udpSender != null && _udpSender.IsConnected)
                 {
-                    await _udpSender.SendPoseAsync(pose);
+                    await _udpSender.SendPoseAsync(ApplyScales(pose));
                 }
 
                 return;
@@ -209,8 +240,11 @@ namespace EDSC.Desktop.Services
                 return;
             }
 
+            // Direct mode: centre on the raw pose, filter the movement, then apply gain to the movement only.
+            // Scaling before centring would multiply the absolute head position and pin every axis at full scale.
             double t = _clock.Elapsed.TotalSeconds;
             double x, y, z, yaw, pitch, roll;
+            double translationScale, yawScale, pitchScale, rollScale;
 
             lock (_lock)
             {
@@ -220,9 +254,20 @@ namespace EDSC.Desktop.Services
                 yaw = _filters[3].Filter(pose.Yaw - center.Yaw, t);
                 pitch = _filters[4].Filter(pose.Pitch - center.Pitch, t);
                 roll = _filters[5].Filter(pose.Roll - center.Roll, t);
+
+                translationScale = TranslationScale;
+                yawScale = YawScale;
+                pitchScale = PitchScale;
+                rollScale = RollScale;
             }
 
-            _freeTrackSender.WritePose(yaw, pitch, roll, x, y, z);
+            _freeTrackSender.WritePose(
+                yaw * yawScale,
+                pitch * pitchScale,
+                roll * rollScale,
+                x * translationScale,
+                y * translationScale,
+                z * translationScale);
         }
 
         public void Dispose()

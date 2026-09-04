@@ -1,3 +1,5 @@
+using EDSC.Desktop.Services;
+using EDSC.Desktop.ViewModels;
 using EDSC.Services;
 using EDSC.ViewModels;
 using System.Diagnostics;
@@ -5,20 +7,20 @@ using System.Diagnostics;
 namespace EDSC.Desktop
 {
     /// <summary>
-    /// Desktop container view model that exposes connection and controls views.
+    /// Desktop container view model that exposes the tracking view and the button editor.
     /// </summary>
     public class DesktopShellViewModel
     {
         public ConnectionViewModel Connection { get; }
-        public MainViewModel Controls { get; }
+        public ButtonEditorViewModel ButtonEditor { get; }
 
-        public DesktopShellViewModel(ConnectionViewModel connectionViewModel, IConfigurationService configService, int port)
+        public DesktopShellViewModel(ConnectionViewModel connectionViewModel, IConfigurationService configService)
         {
             Connection = connectionViewModel;
-            Controls = new MainViewModel(new HttpCommandClient(), configService);
+            ButtonEditor = new ButtonEditorViewModel(configService, new EliteBindingsService());
 
-            Debug.WriteLine("[DesktopShellVM] Initializing local controls");
-            _ = Controls.InitializeAsync("127.0.0.1", port);
+            Debug.WriteLine("[DesktopShellVM] Loading button editor");
+            _ = ButtonEditor.LoadAsync();
         }
     }
 }
