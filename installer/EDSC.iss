@@ -1,6 +1,6 @@
 ; Inno Setup script for EDSC (EXE installer)
 #define AppName "EDSC"
-#define AppVersion "2.0.0"
+#define AppVersion "2.0.1"
 #define AppPublisher "EDSC"
 #define AppExeName "EDSC.Desktop.exe"
 #define PublishDir "..\\src\\EDSC.Desktop\\bin\\Release\\net8.0-windows\\win-x64\\publish"
