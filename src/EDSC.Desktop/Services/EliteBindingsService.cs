@@ -174,82 +174,21 @@ namespace EDSC.Desktop.Services
                 return "No Elite Dangerous bindings were found.";
             }
 
-            var existing = (config.Buttons ?? new List<ButtonConfig>())
-                .Where(b => b != null && !string.IsNullOrEmpty(b.Id))
-                .GroupBy(b => b.Id, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-            var produced = new List<ButtonConfig>();
-            var producedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            int bound = 0;
-            int unbound = 0;
-
-            foreach (var item in bindings.Actions)
-            {
-                existing.TryGetValue(item.Action.Id, out var previous);
-
-                if (!item.IsBound && previous == null)
-                {
-                    continue;
-                }
-
-                var button = new ButtonConfig
-                {
-                    Id = item.Action.Id,
-                    Key = item.Key ?? string.Empty,
-                    Label = previous?.Label is { Length: > 0 } ? previous.Label : item.Action.Label,
-                    Category = item.Action.Category,
-                    IconSvg = previous?.IconSvg is { Length: > 0 } ? previous.IconSvg : item.Action.IconSvg,
-                    Icon = previous?.Icon ?? string.Empty,
-                    Color = previous?.Color is { Length: > 0 } ? previous.Color : item.Action.Color,
-                    Size = previous?.Size > 0 ? previous.Size : 80,
-                    VoiceAliases = previous?.VoiceAliases is { Count: > 0 }
-                        ? new List<string>(previous.VoiceAliases)
-                        : new List<string>(item.Action.VoiceAliases)
-                };
-
-                produced.Add(button);
-                producedIds.Add(button.Id);
-
-                if (item.IsBound)
-                {
-                    bound++;
-                }
-                else
-                {
-                    unbound++;
-                }
-            }
-
-            // Keep anything the user added that the catalogue does not cover
-            int kept = 0;
-            foreach (var button in config.Buttons ?? new List<ButtonConfig>())
-            {
-                if (button == null || string.IsNullOrEmpty(button.Id) || producedIds.Contains(button.Id))
-                {
-                    continue;
-                }
-
-                produced.Add(button);
-                kept++;
-            }
-
-            config.Buttons = produced;
+            var actions = bindings.Actions.Select(item => new ImportedAction(
+                item.Action.Id,
+                item.Action.Label,
+                item.Action.Category,
+                item.Action.IconSvg,
+                item.Action.Color,
+                item.Action.VoiceAliases,
+                item.Key,
+                0));
 
             var presetSummary = bindings.PresetFiles.Count > 0
                 ? string.Join(", ", bindings.PresetFiles.Select(Path.GetFileName))
                 : "none";
 
-            var message = $"Imported {bound} bound buttons from {presetSummary}.";
-            if (unbound > 0)
-            {
-                message += $" {unbound} existing buttons have no keyboard key in your Elite controls and are greyed out.";
-            }
-            if (kept > 0)
-            {
-                message += $" Kept {kept} custom buttons.";
-            }
-
+            config.Buttons = BindingImport.Apply(config.Buttons, actions, presetSummary, out var message);
             return message;
         }
 
@@ -810,7 +749,11 @@ namespace EDSC.Desktop.Services
             return null;
         }
 
-        private static string? KeyNameForCharacter(char ch)
+        /// <summary>
+        /// EDSC key name for a punctuation character on the current keyboard layout, or null if
+        /// the layout has no key for it. Shared with the Star Citizen importer.
+        /// </summary>
+        internal static string? KeyNameForCharacter(char ch)
         {
             try
             {

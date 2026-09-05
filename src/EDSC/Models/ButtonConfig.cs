@@ -38,9 +38,17 @@ namespace EDSC.Models
         [JsonPropertyName("voiceAliases")]
         public List<string> VoiceAliases { get; set; }
 
+        /// <summary>
+        /// How long to hold the key down, in milliseconds. 0 means a normal tap. Games such as
+        /// Star Citizen give some keys a different action on a long press.
+        /// </summary>
+        [JsonPropertyName("holdMs")]
+        public int HoldMs { get; set; }
+
         public ButtonConfig()
         {
             VoiceAliases = new List<string>();
+            HoldMs = 0;
             Id = string.Empty;
             Key = string.Empty;
             Icon = string.Empty;

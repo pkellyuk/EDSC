@@ -17,16 +17,25 @@ namespace EDSC.Models
         [JsonPropertyName("timestamp")]
         public long Timestamp { get; set; }
 
+        /// <summary>
+        /// Hold the key for this long before releasing (0 = normal tap).
+        /// </summary>
+        [JsonPropertyName("holdMs")]
+        public int HoldMs { get; set; }
+
         public CommandRequest()
         {
             ButtonId = string.Empty;
             Key = string.Empty;
             Timestamp = 0;
+            HoldMs = 0;
         }
 
         public override string ToString()
         {
-            return $"CommandRequest [ButtonId={ButtonId}, Key={Key}]";
+            return HoldMs > 0
+                ? $"CommandRequest [ButtonId={ButtonId}, Key={Key}, Hold={HoldMs}ms]"
+                : $"CommandRequest [ButtonId={ButtonId}, Key={Key}]";
         }
     }
 

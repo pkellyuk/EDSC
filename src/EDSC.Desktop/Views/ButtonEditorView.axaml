@@ -42,11 +42,17 @@
         <!-- Toolbar -->
         <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
                     Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-            <Button Content="Import from Elite Dangerous"
-                    Command="{Binding ImportFromEliteCommand}"
+            <TextBlock Text="Game" VerticalAlignment="Center" FontSize="12" Foreground="#D1D5DB"/>
+            <ComboBox ItemsSource="{Binding Games}"
+                      SelectedItem="{Binding SelectedGame}"
+                      ToolTip.Tip="Which game's layout the phone shows and this editor edits. Switching is saved immediately; button edits still need Save."
+                      Width="150"/>
+            <Button Content="{Binding ImportButtonText}"
+                    Command="{Binding ImportCommand}"
                     Background="#7C3AED" Foreground="White" Padding="10,6" CornerRadius="4"/>
             <Button Content="Bind missing keys in Elite"
                     Command="{Binding BindInEliteCommand}"
+                    IsVisible="{Binding IsElite}"
                     ToolTip.Tip="Gives every greyed-out button a spare keyboard key by editing the game's Custom preset (backed up first). Restart Elite afterwards."
                     Background="#B45309" Foreground="White" Padding="10,6" CornerRadius="4"/>
             <Button Content="Add button"
@@ -193,7 +199,7 @@
                 VerticalAlignment="Top">
             <StackPanel Spacing="8">
                 <TextBlock Text="Selected button" FontWeight="Bold" FontSize="13" Foreground="#F9FAFB"/>
-                <TextBlock Text="Click a button to edit it. Drag buttons between categories to regroup them."
+                <TextBlock Text="Click a button to edit it. Drag buttons between categories to regroup them. Each game has its own layout; pick the game at the top."
                            TextWrapping="Wrap" FontSize="11" Foreground="#9CA3AF"
                            IsVisible="{Binding !#Root.DataContext.HasSelection}"/>
                 <StackPanel Spacing="6"
@@ -203,6 +209,8 @@
                     <TextBox Text="{Binding Label}"/>
                     <TextBlock Text="Key (e.g. U, F1, NUMPAD5, LSHIFT+U)" FontSize="11" Foreground="#D1D5DB"/>
                     <TextBox Text="{Binding Key}"/>
+                    <TextBlock Text="Hold for (ms, 0 = tap; Star Citizen long presses need ~700)" FontSize="11" Foreground="#D1D5DB" TextWrapping="Wrap"/>
+                    <NumericUpDown Value="{Binding HoldMs}" Minimum="0" Maximum="5000" Increment="100" FormatString="0"/>
                     <TextBlock Text="Voice aliases (comma separated, e.g. frame shift, jump)" FontSize="11" Foreground="#D1D5DB" TextWrapping="Wrap"/>
                     <TextBox Text="{Binding VoiceAliases}"/>
                     <TextBlock Text="Icon" FontSize="11" Foreground="#D1D5DB"/>

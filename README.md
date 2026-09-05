@@ -1,6 +1,6 @@
-# EDSC - Elite Dangerous Ship Controls
+# EDSC - Elite Dangerous and Star Citizen Ship Controls
 
-Remote control your Elite Dangerous ship from your phone's browser, and track your head with the phone's camera.
+Remote control your ship in Elite Dangerous or Star Citizen from your phone's browser, and track your head with the phone's camera.
 
 [![.NET 8.0](https://img.shields.io/badge/.NET-8.0-blue)](https://dotnet.microsoft.com/download)
 [![AvaloniaUI](https://img.shields.io/badge/AvaloniaUI-11.0-purple)](https://avaloniaui.net/)
@@ -8,7 +8,7 @@ Remote control your Elite Dangerous ship from your phone's browser, and track yo
 
 ## What is EDSC?
 
-EDSC is a Windows desktop app that serves a web control panel for Elite Dangerous. Scan a QR code from the desktop UI and control ship functions from any phone browser on the same network. The same page can turn the phone into a head tracker.
+EDSC is a Windows desktop app that serves a web control panel for Elite Dangerous and Star Citizen. Scan a QR code from the desktop UI and control ship functions from any phone browser on the same network. The same page can turn the phone into a head tracker. Each game has its own button layout; a switcher in the Buttons tab picks which one the phone shows.
 
 **How it works:**
 - Desktop app runs a local HTTP/HTTPS server
@@ -25,7 +25,9 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 - Head tracking two ways: on the phone with MediaPipe, or on the PC with ONNX models
 - Head pose output to Opentrack (UDP) or straight to the game's TrackIR interface with no Opentrack running
 - Drag-and-drop button editor on the desktop, with live updates to the phone
-- Import of your Elite Dangerous key bindings to build and group the buttons automatically
+- Separate layouts for Elite Dangerous and Star Citizen, switched from the desktop; the phone page rebrands itself to match
+- Import of your Elite Dangerous or Star Citizen key bindings to build and group the buttons automatically
+- Long-press buttons for games that put a second action on a held key (hold to exit seat, hold for NAV mode)
 
 ## Quick Start
 
@@ -47,16 +49,20 @@ The window opens with two tabs: **Tracking** (QR code, sensitivity, output, prev
 
 The phone page follows the PC: when you save a layout or restart the app, the page updates itself.
 
+The page is laid out as a cockpit display: category keys around the edges, the selected category's buttons in the centre, and the tracking preview docked bottom-right (tap it to re-centre). **Fullscreen** hides the browser chrome, and **Settings** opens the tracking options: track on phone, camera size, mesh detail, and reload.
+
 ## Buttons
 
 ### Editing the layout
 
 Open the **Buttons** tab on the desktop.
 
+- The **Game** selector chooses which layout you are editing and which one the phone shows. Switching is saved immediately and the phone follows within a few seconds; the layout for the other game is kept untouched
 - Drag a button onto a category to move it there, or onto another button to insert before it
-- Click a button to edit its label, key, icon, colour and id
+- Click a button to edit its label, key, hold time, icon, colour and id
+- **Hold for** keeps the key down for that many milliseconds. Leave it at 0 for a normal tap; Star Citizen's long-press actions (NAV mode on B, exit seat on Y, autoland on N) want around 700
 - **Add category** creates an empty group to drag into; empty groups can be removed with the X
-- **Save** writes `config.json`; the phone reloads its layout within a few seconds
+- **Save** writes both layouts to `config.json`; the phone reloads its layout within a few seconds
 
 Keys use the names of Windows virtual keys: letters and digits (`U`, `4`), `F1`..`F24`, `NUMPAD5`, `HOME`, `DELETE`, `RETURN`, `BACK`, `ESCAPE`, `OEM_PLUS`, and so on. Prefix modifiers with `+`, for example `LSHIFT+U` or `LCONTROL+LMENU+SPACE`.
 
@@ -70,6 +76,16 @@ Keys use the names of Windows virtual keys: letters and digits (`U`, `4`), `F1`.
 - Existing buttons keep their colour and icon; buttons the importer does not know about are kept
 
 If the game install is not found, set `eliteControlSchemesPath` in `config.json` to the `ControlSchemes` folder.
+
+### Import from Star Citizen
+
+Select **Star Citizen** in the Game selector. The first time, the layout is built automatically; **Import from Star Citizen** rebuilds it later.
+
+- Star Citizen only writes the actions you have rebound to `<install>\StarCitizen\LIVE\user\client\0\Profiles\default\actionmaps.xml`. Everything else uses the game's stock key, which EDSC carries for the actions it knows about (Alpha 4.x defaults)
+- The install is found via the RSI Launcher's library folder, `C:\Program Files\Roberts Space Industries`, or the root of any drive. LIVE is preferred over PTU. If it is not found the stock keys are still used; set `starCitizenPath` in `config.json` to the channel folder (the one containing `Bin64`) if yours lives elsewhere
+- Keyboard rebinds replace the default; a joystick-only rebind leaves the keyboard key in place. Actions rebound to a double tap are shown as **not bound**
+- Long-press actions come in with a hold time already set. Check the stock keys against your own game version, since CIG moves defaults between patches
+- The game must be set to TrackIR under Options > Head Tracking for head tracking; the **Head Tracking** button (Numpad / by default) toggles it in game
 
 ## Head Tracking
 
@@ -122,7 +138,7 @@ The app generates a self-signed certificate. Click **Install SSL Certificate** t
 
 ## Configuration
 
-`config.json` lives in `%APPDATA%\EDSC`. On first run it is created with a default layout, or migrated from a copy next to the executable left by an older version. Each button looks like:
+`config.json` lives in `%APPDATA%\EDSC`. On first run it is created with a default layout, or migrated from a copy next to the executable left by an older version. `buttons` holds the Elite Dangerous layout (the name is kept so older files load unchanged), `starCitizenButtons` the Star Citizen one, and `activeGame` (`elite` or `starcitizen`) says which the phone shows. Each button looks like:
 
 ```json
 {
@@ -132,7 +148,8 @@ The app generates a self-signed certificate. Click **Install SSL Certificate** t
   "category": "Combat",
   "iconSvg": "hardpoints.svg",
   "color": "#6B7280",
-  "size": 80
+  "size": 80,
+  "holdMs": 0
 }
 ```
 
@@ -188,8 +205,11 @@ EDSC/
 **A button does nothing in game**
 - The key must match a keyboard binding in the game's active preset. Use **Import from Elite Dangerous** to see which actions are bound
 
-**Phone tracking is slow**
-- The readout on the phone shows inference time and whether the GPU is in use. Chrome tends to do better than other Android browsers
+**Phone tracking is slow or jumpy**
+- The readout on the phone shows inference time, the whole-frame time, whether the GPU is in use, and what the camera agreed to (`cam 640x480@30fps`). If the camera reports 15 fps the room is too dark; more light helps more than any setting
+- The **Camera** and **Mesh** selectors in the phone page's **Settings** drawer trade detail for speed. Outline mesh is the default; 480x360 usually gets a mid-range phone from under 20 to around 30 poses per second
+- Chrome tends to do better than other Android browsers
+- In direct output mode the PC resamples the pose stream to 120 Hz, so even 18 poses per second should not stair-step in the game. The Pose Output status shows the measured input rate
 
 ## Installer (EXE)
 

@@ -2,6 +2,8 @@ using EDSC.Services;
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace EDSC.Desktop.Services
@@ -11,7 +13,11 @@ namespace EDSC.Desktop.Services
     /// FreeTrack shared memory that the game's NPClient DLL reads (direct mode).
     ///
     /// Opentrack does its own centring and axis mapping. In direct mode this router
-    /// subtracts a captured centre pose so the game sees zero when you look straight ahead.
+    /// subtracts a captured centre pose so the game sees zero when you look straight ahead,
+    /// and resamples the incoming pose stream to a steady 120 Hz. A phone delivers poses at
+    /// 15-30 per second; written straight to the game that shows as a visible stair-step
+    /// every frame. The output thread interpolates between the last samples (and briefly
+    /// extrapolates when one is late) so the game sees continuous motion, then filters it.
     /// </summary>
     public sealed class PoseOutputRouter : IDisposable
     {
@@ -35,6 +41,31 @@ namespace EDSC.Desktop.Services
         // One filter per axis: X, Y, Z, Yaw, Pitch, Roll.
         private readonly OneEuroFilter[] _filters = new OneEuroFilter[6];
         private readonly Stopwatch _clock = Stopwatch.StartNew();
+
+        // Resampling. Raw samples are kept on a timeline built from the phone's own capture
+        // timestamps when it sends them, so WiFi jitter does not turn into velocity noise.
+        private const int OutputRateHz = 120;
+        private const double MinInterval = 0.005;
+        private const double MaxInterval = 0.2;
+        private const double StreamTimeoutSeconds = 1.0;
+        private const double ClockResyncSeconds = 1.0;
+        private const int RingSize = 8;
+
+        private struct Sample
+        {
+            public double T;
+            public double X, Y, Z, Yaw, Pitch, Roll;
+        }
+
+        private readonly Sample[] _ring = new Sample[RingSize];
+        private int _ringCount;
+        private int _ringHead;            // index of the newest sample
+        private double _meanInterval = 1.0 / 30.0;
+        private double _lastSampleTime = double.NaN;
+        private double _clockOffset = double.NaN;   // PC seconds minus source seconds
+
+        private Thread? _outputThread;
+        private volatile bool _outputRunning;
 
         public PoseOutputRouter(OpentrackUdpSender? udpSender)
         {
@@ -123,6 +154,13 @@ namespace EDSC.Desktop.Services
             }
         }
 
+        private void ResetResampler()
+        {
+            _ringCount = 0;
+            _ringHead = 0;
+            _lastSampleTime = double.NaN;
+        }
+
         /// <summary>
         /// True to bypass Opentrack and write to the game directly.
         /// </summary>
@@ -147,6 +185,7 @@ namespace EDSC.Desktop.Services
                     _directOutputEnabled = value;
 
                     ResetFilters();
+                    ResetResampler();
 
                     if (value)
                     {
@@ -155,9 +194,11 @@ namespace EDSC.Desktop.Services
                         _centreRequestedAt = -1.0;
                         _centreSamples.Clear();
                         _center = null;
+                        StartOutputThread();
                     }
                     else
                     {
+                        StopOutputThread();
                         _freeTrackSender.Close();
                         _center = null;
                     }
@@ -183,12 +224,26 @@ namespace EDSC.Desktop.Services
                             return $"{_freeTrackSender.Status}. Centring: sit normally and look straight ahead for a few seconds.";
                         }
 
-                        return _freeTrackSender.Status;
+                        return $"{_freeTrackSender.Status}. Output {OutputRateHz} Hz, input ~{InputRateHz:F0}/s.";
                     }
 
                     return _udpSender != null && _udpSender.IsConnected
                         ? "Sending to Opentrack (UDP 127.0.0.1:4242)"
                         : "Opentrack UDP sender not connected";
+                }
+            }
+        }
+
+        /// <summary>
+        /// Poses per second arriving at the router, from the measured sample spacing.
+        /// </summary>
+        public double InputRateHz
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _ringCount > 1 ? 1.0 / _meanInterval : 0.0;
                 }
             }
         }
@@ -207,7 +262,29 @@ namespace EDSC.Desktop.Services
             }
         }
 
-        public async Task SendPoseAsync(HeadPose pose)
+        /// <summary>
+        /// The pose source stopped (face lost or stream closed). The output holds its last value
+        /// rather than extrapolating into nothing.
+        /// </summary>
+        public void NotifyLost()
+        {
+            lock (_lock)
+            {
+                ResetResampler();
+            }
+        }
+
+        public Task SendPoseAsync(HeadPose pose)
+        {
+            return SendPoseAsync(pose, null);
+        }
+
+        /// <summary>
+        /// Accept one raw pose.
+        /// </summary>
+        /// <param name="pose">Unscaled pose from the tracker.</param>
+        /// <param name="sourceTimestampMs">Capture time on the sender's own clock, if known, in milliseconds.</param>
+        public async Task SendPoseAsync(HeadPose pose, double? sourceTimestampMs)
         {
             if (pose == null)
             {
@@ -215,7 +292,6 @@ namespace EDSC.Desktop.Services
             }
 
             bool direct;
-            HeadPose? center;
             double now = _clock.Elapsed.TotalSeconds;
 
             lock (_lock)
@@ -253,6 +329,7 @@ namespace EDSC.Desktop.Services
                         _centreRequestedAt = -1.0;
                         _centreSamples.Clear();
                         ResetFilters();
+                        ResetResampler();
                     }
                     else
                     {
@@ -262,39 +339,269 @@ namespace EDSC.Desktop.Services
                     }
                 }
 
-                center = _center;
+                if (direct)
+                {
+                    PushSample(pose, now, sourceTimestampMs);
+                    return;
+                }
             }
 
-            // Poses arrive unscaled. Opentrack centres and maps for itself, so it gets the scaled absolute pose.
-            if (!direct)
+            // Opentrack centres, filters and maps for itself at its own tick rate, so it gets the
+            // scaled absolute pose as soon as it arrives.
+            if (_udpSender != null && _udpSender.IsConnected)
             {
-                if (_udpSender != null && _udpSender.IsConnected)
+                await _udpSender.SendPoseAsync(ApplyScales(pose));
+            }
+        }
+
+        /// <summary>
+        /// Add a raw sample to the timeline. Called under the lock.
+        /// </summary>
+        private void PushSample(HeadPose pose, double now, double? sourceTimestampMs)
+        {
+            double t = now;
+
+            if (sourceTimestampMs.HasValue && !double.IsNaN(sourceTimestampMs.Value))
+            {
+                double source = sourceTimestampMs.Value / 1000.0;
+                double delta = now - source;
+
+                if (double.IsNaN(_clockOffset) || Math.Abs(delta - _clockOffset) > ClockResyncSeconds)
                 {
-                    await _udpSender.SendPoseAsync(ApplyScales(pose));
+                    // First sample, or the sender's clock restarted (page reload)
+                    _clockOffset = delta;
+                }
+                else if (delta < _clockOffset)
+                {
+                    // A packet that arrived faster than any before: closer to the true offset
+                    _clockOffset = delta;
+                }
+                else
+                {
+                    // Follow slow clock drift without chasing network delay
+                    _clockOffset += (delta - _clockOffset) * 0.002;
                 }
 
-                return;
+                t = source + _clockOffset;
             }
 
-            if (center == null)
+            if (!double.IsNaN(_lastSampleTime))
+            {
+                double interval = t - _lastSampleTime;
+                if (interval <= 0)
+                {
+                    t = _lastSampleTime + 0.001;
+                    interval = 0.001;
+                }
+
+                if (now - _lastSampleTime > StreamTimeoutSeconds)
+                {
+                    // Stream restarted: start the timeline afresh
+                    ResetResampler();
+                }
+                else
+                {
+                    _meanInterval += (Math.Clamp(interval, MinInterval, MaxInterval) - _meanInterval) * 0.1;
+                }
+            }
+
+            _lastSampleTime = t;
+
+            _ringHead = (_ringHead + 1) % RingSize;
+            _ring[_ringHead] = new Sample
+            {
+                T = t,
+                X = pose.X,
+                Y = pose.Y,
+                Z = pose.Z,
+                Yaw = pose.Yaw,
+                Pitch = pose.Pitch,
+                Roll = pose.Roll
+            };
+            if (_ringCount < RingSize)
+            {
+                _ringCount++;
+            }
+        }
+
+        private Sample RingAt(int ageFromNewest)
+        {
+            return _ring[((_ringHead - ageFromNewest) % RingSize + RingSize) % RingSize];
+        }
+
+        private static Sample Lerp(in Sample a, in Sample b, double f)
+        {
+            return new Sample
+            {
+                X = a.X + (b.X - a.X) * f,
+                Y = a.Y + (b.Y - a.Y) * f,
+                Z = a.Z + (b.Z - a.Z) * f,
+                Yaw = a.Yaw + (b.Yaw - a.Yaw) * f,
+                Pitch = a.Pitch + (b.Pitch - a.Pitch) * f,
+                Roll = a.Roll + (b.Roll - a.Roll) * f
+            };
+        }
+
+        /// <summary>
+        /// Pose on the raw timeline at <paramref name="target"/>: interpolated between the two
+        /// surrounding samples, extrapolated for at most one sample interval past the newest,
+        /// otherwise held. Called under the lock with at least one sample present.
+        /// </summary>
+        private Sample Resample(double target)
+        {
+            var newest = RingAt(0);
+
+            if (_ringCount == 1)
+            {
+                return newest;
+            }
+
+            if (target >= newest.T)
+            {
+                var previous = RingAt(1);
+                double span = newest.T - previous.T;
+                if (span <= 0)
+                {
+                    return newest;
+                }
+
+                double ahead = Math.Min(target - newest.T, _meanInterval);
+                return Lerp(previous, newest, 1.0 + ahead / span);
+            }
+
+            for (int age = 1; age < _ringCount; age++)
+            {
+                var older = RingAt(age);
+                var younger = RingAt(age - 1);
+                if (target >= older.T)
+                {
+                    double span = younger.T - older.T;
+                    return span <= 0 ? younger : Lerp(older, younger, (target - older.T) / span);
+                }
+            }
+
+            return RingAt(_ringCount - 1);
+        }
+
+        private void StartOutputThread()
+        {
+            if (_outputThread != null)
             {
                 return;
             }
 
-            // Direct mode: centre on the raw pose, filter the movement, then apply gain to the movement only.
-            // Scaling before centring would multiply the absolute head position and pin every axis at full scale.
-            double t = _clock.Elapsed.TotalSeconds;
-            double x, y, z, yaw, pitch, roll;
+            _outputRunning = true;
+            _outputThread = new Thread(OutputLoop)
+            {
+                IsBackground = true,
+                Name = "EDSC pose output",
+                Priority = ThreadPriority.AboveNormal
+            };
+            _outputThread.Start();
+        }
+
+        private void StopOutputThread()
+        {
+            // The loop checks the flag every millisecond and exits on its own; no join, because
+            // this is called under the lock the loop also takes.
+            _outputRunning = false;
+            _outputThread = null;
+        }
+
+        private void OutputLoop()
+        {
+            bool periodRaised = false;
+            try
+            {
+                periodRaised = TimeBeginPeriod(1) == 0;
+            }
+            catch
+            {
+                // Not fatal; the sleep just gets coarser
+            }
+
+            double period = 1.0 / OutputRateHz;
+            double next = _clock.Elapsed.TotalSeconds + period;
+
+            try
+            {
+                while (_outputRunning)
+                {
+                    double remaining = next - _clock.Elapsed.TotalSeconds;
+                    if (remaining > 0.002)
+                    {
+                        Thread.Sleep(1);
+                        continue;
+                    }
+
+                    while (_clock.Elapsed.TotalSeconds < next)
+                    {
+                        Thread.SpinWait(50);
+                    }
+
+                    next += period;
+                    if (_clock.Elapsed.TotalSeconds - next > period * 4)
+                    {
+                        // Fell behind (debugger, sleep); do not burst to catch up
+                        next = _clock.Elapsed.TotalSeconds + period;
+                    }
+
+                    OutputTick();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PoseOutputRouter] Output loop stopped: {ex.Message}");
+            }
+            finally
+            {
+                if (periodRaised)
+                {
+                    try
+                    {
+                        TimeEndPeriod(1);
+                    }
+                    catch
+                    {
+                        // Ignore
+                    }
+                }
+            }
+        }
+
+        private void OutputTick()
+        {
+            double yaw, pitch, roll, x, y, z;
             double translationScale, yawScale, pitchScale, rollScale;
 
             lock (_lock)
             {
-                x = _filters[0].Filter(pose.X - center.X, t);
-                y = _filters[1].Filter(pose.Y - center.Y, t);
-                z = _filters[2].Filter(pose.Z - center.Z, t);
-                yaw = _filters[3].Filter(pose.Yaw - center.Yaw, t);
-                pitch = _filters[4].Filter(pose.Pitch - center.Pitch, t);
-                roll = _filters[5].Filter(pose.Roll - center.Roll, t);
+                if (!_directOutputEnabled || _center == null || _centerPending || _ringCount == 0)
+                {
+                    return;
+                }
+
+                double now = _clock.Elapsed.TotalSeconds;
+                var newest = RingAt(0);
+
+                if (now - newest.T > StreamTimeoutSeconds + MaxInterval)
+                {
+                    // Source stopped; leave the game holding the last written pose
+                    return;
+                }
+
+                // One sample interval of delay puts the target between the two newest samples in the
+                // common case, so the output is a true interpolation; extrapolation only covers late packets.
+                double delay = Math.Clamp(_meanInterval + 0.004, 0.02, 0.15);
+                var sample = Resample(now - delay);
+
+                var center = _center;
+                x = _filters[0].Filter(sample.X - center.X, now);
+                y = _filters[1].Filter(sample.Y - center.Y, now);
+                z = _filters[2].Filter(sample.Z - center.Z, now);
+                yaw = _filters[3].Filter(sample.Yaw - center.Yaw, now);
+                pitch = _filters[4].Filter(sample.Pitch - center.Pitch, now);
+                roll = _filters[5].Filter(sample.Roll - center.Roll, now);
 
                 translationScale = TranslationScale;
                 yawScale = YawScale;
@@ -302,6 +609,8 @@ namespace EDSC.Desktop.Services
                 rollScale = RollScale;
             }
 
+            // Direct mode: centre on the raw pose, filter the movement, then apply gain to the movement only.
+            // Scaling before centring would multiply the absolute head position and pin every axis at full scale.
             _freeTrackSender.WritePose(
                 yaw * yawScale,
                 pitch * pitchScale,
@@ -315,8 +624,15 @@ namespace EDSC.Desktop.Services
         {
             lock (_lock)
             {
+                StopOutputThread();
                 _freeTrackSender.Dispose();
             }
         }
+
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        private static extern uint TimeBeginPeriod(uint milliseconds);
+
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        private static extern uint TimeEndPeriod(uint milliseconds);
     }
 }

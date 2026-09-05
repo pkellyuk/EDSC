@@ -269,6 +269,18 @@ namespace EDSC.Desktop.Services
                                 {
                                     await HandleCommandRequest(context);
                                 }
+                                else if (context.Request.Path == "/tracking/center" && context.Request.Method == "POST")
+                                {
+                                    if (_poseOutput == null || !_poseOutput.DirectOutputEnabled)
+                                    {
+                                        await SendResponse(context, false, "Enable 'Send directly to game' on the PC to recentre here. Opentrack uses its own centring control.");
+                                    }
+                                    else
+                                    {
+                                        _poseOutput.Center();
+                                        await SendResponse(context, true, "Recentre requested. Look straight ahead and hold still for 4 seconds.");
+                                    }
+                                }
                                 else if (context.Request.Path == "/video" && context.WebSockets.IsWebSocketRequest)
                                 {
                                     await HandleVideoWebSocket(context);
@@ -369,8 +381,20 @@ namespace EDSC.Desktop.Services
                 }
             }
 
+            // The page only ever sees the active game's layout, plus enough to brand itself
+            var payload = new
+            {
+                game = GameIds.Normalize(configToReturn.ActiveGame),
+                gameName = GameIds.DisplayName(configToReturn.ActiveGame),
+                buttons = configToReturn.ActiveButtons,
+                configVersion = configToReturn.ConfigVersion,
+                lastUpdatedUtc = configToReturn.LastUpdatedUtc,
+                lastUpdatedBy = configToReturn.LastUpdatedBy
+            };
+
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(configToReturn));
+            context.Response.Headers["Cache-Control"] = "no-store";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
 
             Debug.WriteLine("[HttpCommandServer] Exit: HandleConfigGet");
         }
@@ -405,6 +429,7 @@ namespace EDSC.Desktop.Services
             {
                 version = config.ConfigVersion,
                 updatedUtc = config.LastUpdatedUtc,
+                game = GameIds.Normalize(config.ActiveGame),
                 page = PageStamp,
                 preview = PreviewEnabled
             }));
@@ -646,6 +671,46 @@ namespace EDSC.Desktop.Services
       width: 18px;
       height: 18px;
     }
+    .tracking-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .tracking-options select {
+      margin-left: 6px;
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid #2a313d;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 13px;
+    }
+    .game-badge {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      vertical-align: middle;
+      background: #374151;
+      color: #f9fafb;
+    }
+    body.game-elite .game-badge {
+      background: #b45309;
+    }
+    body.game-elite header {
+      border-bottom-color: #b45309;
+    }
+    body.game-starcitizen .game-badge {
+      background: #1d4ed8;
+    }
+    body.game-starcitizen header {
+      border-bottom-color: #1d4ed8;
+    }
     .pose-readout {
       margin-top: 8px;
       font-family: Consolas, monospace;
@@ -661,156 +726,310 @@ namespace EDSC.Desktop.Services
     .btn.unbound {
       opacity: 0.4;
     }
+    /* Fit mode is a multifunction display with physical-style perimeter keys. */
+    .cockpit-only { display: none; }
+    #recenterTracking { display: none; }
     body.fit-all {
+      --hud: #8ee9dd;
+      --hud-dim: #537d80;
+      --bezel: #101b22;
       overflow: hidden;
+      background: #080e13;
     }
     body.fit-all header,
     body.fit-all .status,
-    body.fit-all .tracking-mode,
     body.fit-all #voiceFeedback,
-    body.fit-all #reload {
-      display: none !important;
+    body.fit-all #previewBtn { display: none !important; }
+    /* Settings drawer under the toolbar; closed by default so the display keeps the room */
+    .settings-panel { display: none; }
+    body.settings-open .settings-panel {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 18px;
+      padding: 8px 12px;
+      border: 1px solid #35454f;
+      border-radius: 8px;
+      background: #0d171f;
+      color: #b7cdd2;
+      font-size: 12px;
     }
+    .settings-panel .tracking-mode,
+    .settings-panel .tracking-options { margin: 0; font-size: 12px; }
+    .settings-panel .tracking-options { gap: 12px; align-items: center; }
+    .settings-panel #reload {
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 1px solid #33434d;
+      border-radius: 3px;
+      background: #131f28;
+      color: #b7cdd2;
+      font-size: 11px;
+    }
+    .settings-readout { flex-basis: 100%; margin: 0; font-size: 11px; line-height: 1.4; white-space: pre-wrap; }
+    .settings-readout[hidden] { display: none; }
     body.fit-all main {
+      box-sizing: border-box;
       max-width: none;
-      padding: 4px;
+      height: 100vh;
+      height: 100dvh;
+      padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     body.fit-all .toolbar {
-      justify-content: center;
-      margin-bottom: 4px;
+      flex: 0 0 auto;
+      gap: 6px;
+      margin: 0;
+      align-items: stretch;
+    }
+    body.fit-all .toolbar::before {
+      content: 'EDSC / FLIGHT DECK';
+      flex: 1;
+      align-self: center;
+      color: var(--hud-dim);
+      font: 11px Consolas, monospace;
+      letter-spacing: 2px;
     }
     body.fit-all .toolbar button {
-      padding: 5px 9px;
+      min-height: 36px;
+      padding: 5px 10px;
+      border: 1px solid #33434d;
+      border-radius: 3px;
+      background: #131f28;
+      font-size: 11px;
+      color: #b7cdd2;
     }
-    #blades,
-    #bladeNav {
-      display: none;
-    }
-    body.fit-all #blades {
-      display: block;
-    }
-    body.fit-all.blades-mode #bladeNav {
+    body.fit-all .toolbar button[aria-pressed=""true""] { border-color: var(--hud-dim); color: var(--hud); }
+    body.fit-all .toolbar .active, body.fit-all .toolbar .listening { border-color: #ff9a6c; color: #ffb08c; }
+    body.fit-all #cockpit {
+      flex: 1;
+      min-height: 0;
       display: grid;
-      grid-template-columns: repeat(var(--blade-count, 1), minmax(0, 1fr));
-      gap: 2px;
-      margin-bottom: 4px;
+      grid-template-columns: clamp(70px, 11vw, 132px) minmax(0, 1fr) clamp(70px, 11vw, 132px);
+      grid-template-rows: 58px minmax(0, 1fr) 100px;
+      grid-template-areas: 'top top top' 'left screen right' 'bottom bottom bottom';
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #35454f;
+      border-radius: 18px 18px 28px 28px;
+      background: linear-gradient(135deg, #24313a 0, #121e27 22%, #0d171f 80%, #202d36 100%);
+      box-shadow: inset 0 0 0 4px #0c141b, inset 0 0 0 5px #293640, 0 8px 32px #0006;
     }
-    #bladeNav button {
+    body.fit-all .cockpit-only { display: flex; }
+    .edge-rail { min-width: 0; min-height: 0; gap: 7px; }
+    body.fit-all .edge-rail { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; }
+    #navTop { grid-area: top; padding: 0 clamp(20px, 10vw, 120px); }
+    #navLeft { grid-area: left; }
+    #navRight { grid-area: right; }
+    body.fit-all #navLeft, body.fit-all #navRight { grid-auto-flow: row; grid-auto-rows: minmax(0, 1fr); }
+    .edge-key {
+      position: relative;
       min-width: 0;
-      overflow: hidden;
-      padding: 9px 3px 7px;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      clip-path: polygon(7px 0, 100% 0, calc(100% - 7px) 100%, 0 100%);
-      color: #fff;
-      font-size: clamp(7px, 2.4vw, 10px);
-      font-weight: 600;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    #bladeNav button[aria-selected=""true""] {
-      border-bottom-color: #fff;
-      filter: brightness(1.3);
-      transform: translateY(2px);
-    }
-    body.fit-all #trackingPanel {
-      width: min(180px, 48vw);
-      padding: 4px;
-      margin: 0 auto 4px auto;
-      border-radius: 6px;
-    }
-    body.fit-all .tracking-status {
-      margin-bottom: 3px;
-      font-size: 10px;
-    }
-    body.fit-all #videoCanvas,
-    body.fit-all #videoPreview {
+      min-height: 44px;
+      padding: 8px 5px;
+      border: 1px solid #3a4b56;
       border-radius: 4px;
+      box-shadow: inset 0 1px #ffffff12, 0 3px 0 #060c11;
+      background: linear-gradient(#24323c, #17232c);
+      color: #a5bdc5;
+      cursor: pointer;
+      font: 600 11px/1.3 'Segoe UI', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      overflow-wrap: anywhere;
     }
-    body.fit-all .pose-readout {
-      display: none !important;
+    .edge-key::before { content: attr(data-channel); display: block; color: #617e8b; font: 9px Consolas, monospace; margin-bottom: 5px; }
+    .edge-key::after { content: ''; position: absolute; bottom: 4px; left: 35%; right: 35%; height: 2px; background: #49616e; }
+    .edge-key[aria-pressed=""true""] { color: #c6fff2; border-color: #77c9bc; background: linear-gradient(#1c4142, #172e34); box-shadow: inset 0 0 18px #71fbd914, 0 3px 0 #060c11; }
+    .edge-key[aria-pressed=""true""]::after { background: var(--hud); box-shadow: 0 0 8px #82f3d8; }
+    .edge-key[aria-pressed=""true""]::before { color: var(--hud); }
+    body.fit-all button:focus-visible { outline: 2px solid #fff1ad; outline-offset: 2px; }
+    body.fit-all button:active { filter: brightness(1.3); }
+    body.fit-all #controlDisplay {
+      grid-area: screen;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      border: 1px solid #436064;
+      border-radius: 8px;
+      background: radial-gradient(ellipse at 50% 20%, #13303688, transparent 80%), repeating-linear-gradient(0deg, transparent, transparent 31px, #6cc9bb05 32px), #081419;
+      box-shadow: 0 0 0 3px #080f15, inset 0 0 35px #0008;
+      overflow: hidden;
     }
-    body.fit-all #grid {
-      display: grid;
-      grid-template-columns: repeat(var(--fit-columns, 4), minmax(0, 1fr));
-      gap: var(--fit-gap, 4px);
-    }
-    body.fit-all #grid > .category,
+    .display-heading { flex: 0 0 auto; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #28484c; }
+    .display-heading small { display: block; color: var(--hud-dim); font: 9px Consolas, monospace; letter-spacing: 2px; margin-bottom: 4px; }
+    #activeCategory { margin: 0; font: 500 clamp(13px, 2.2vw, 22px) 'Segoe UI', sans-serif; letter-spacing: 1px; text-transform: uppercase; color: #b9f6ea; overflow-wrap: anywhere; }
+    #categoryCount { flex-shrink: 0; font: 10px Consolas, monospace; color: var(--hud-dim); }
+    body.fit-all #grid { flex: 1; min-height: 0; margin: 10px 0; }
+    body.fit-all #grid > .category { display: none; }
+    body.fit-all #grid > .category.active-category { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; border: 0; padding: 0; margin: 0; background: transparent; }
+    body.fit-all #grid > .category > h2 { display: none; }
     body.fit-all #grid > .category > .grid {
-      display: contents;
-    }
-    body.fit-all #grid > .category > h2 {
-      display: none;
-    }
-    body.fit-all.blades-mode #grid {
-      display: block;
-    }
-    body.fit-all.blades-mode #grid > .category {
-      display: none;
-    }
-    body.fit-all.blades-mode #grid > .category.active-blade {
-      display: block;
-      margin: 0;
-      padding: 8px;
-      border-radius: 4px 4px 10px 10px;
-    }
-    body.fit-all.blades-mode #grid > .category.active-blade > h2 {
-      display: block;
-      margin: 0 0 6px;
-      font-size: 13px;
-    }
-    body.fit-all.blades-mode #grid > .category.active-blade > .grid {
+      flex: 1;
+      min-height: 0;
       display: grid;
-      grid-template-columns: repeat(var(--fit-columns, 3), minmax(0, var(--fit-cell-size, 120px)));
-      gap: var(--fit-gap, 4px);
-      justify-content: center;
+      grid-template-columns: repeat(var(--fit-columns, 3), minmax(0, 1fr));
+      grid-auto-rows: var(--fit-cell-size, 80px);
+      align-content: center;
+      gap: 6px;
     }
     body.fit-all .btn {
       width: 100% !important;
-      height: auto !important;
-      aspect-ratio: 1;
+      height: 100% !important;
       min-width: 0;
-      padding: 2px;
-      border-radius: 7px;
-      font-size: var(--fit-label-size, 9px);
-      line-height: 1.05;
+      min-height: 0;
+      padding: 5px;
+      border: 1px solid #385358;
+      border-top: 2px solid var(--button-accent, #83c7bd);
+      border-radius: 3px;
+      background: linear-gradient(145deg, #1b3037, #101f27) !important;
+      color: #d2e9e7;
+      font-size: var(--fit-label-size, 11px);
+      line-height: 1.15;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+    }
+    body.fit-all .btn .icon { flex-shrink: 0; width: var(--fit-icon-size, 28px); height: var(--fit-icon-size, 28px); margin: 0; }
+    body.fit-all .btn .icon svg { width: 100%; height: 100%; }
+    body.fit-all .btn .command-label { width: 100%; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    body.fit-all .btn small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font: 9px Consolas, monospace; color: #789b9f; }
+    body.fit-all .btn.unbound { opacity: .45; }
+    body.fit-all .btn[hidden] { display: none; }
+    .display-footer { flex: 0 0 auto; min-height: 32px; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #28484c; padding-top: 6px; font: 10px Consolas, monospace; color: var(--hud-dim); }
+    #deckStatus { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .page-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .page-controls[hidden] { display: none; }
+    #commandPages[hidden] { display: flex; visibility: hidden; }
+    .page-controls button { min-width: 36px; min-height: 32px; border: 1px solid #3d6267; border-radius: 3px; color: var(--hud); background: #152a32; cursor: pointer; }
+    .page-controls button:disabled { opacity: .25; cursor: default; }
+    body.fit-all #cockpitBottom { grid-area: bottom; display: grid; grid-template-columns: minmax(0, 1fr) clamp(132px, 23vw, 210px); grid-template-rows: minmax(0, 1fr) auto; gap: 5px 12px; min-height: 0; }
+    #navBottom { grid-column: 1; grid-row: 1; }
+    #navBank { grid-column: 1; grid-row: 2; align-self: center; display: flex; align-items: center; justify-content: space-between; gap: 4px; color: var(--hud-dim); font: 9px Consolas, monospace; }
+    #navBank[hidden] { display: none; }
+    #trackingDock { grid-column: 2; grid-row: 1 / span 2; min-height: 0; }
+    body.fit-all #trackingPanel {
+      position: relative;
+      box-sizing: border-box;
+      display: flex !important;
+      flex-direction: column;
+      height: 100%;
+      padding: 5px;
+      margin: 0;
+      border-radius: 4px;
+      border: 1px solid #49656b;
+      background: #0a171e;
       overflow: hidden;
     }
-    body.fit-all .btn .icon {
-      width: var(--fit-icon-size, 24px);
-      height: var(--fit-icon-size, 24px);
-      margin: 0 auto 2px auto;
+    body.fit-all .tracking-status { margin: 0; font: 8px Consolas, monospace; color: #92babf; gap: 4px; }
+    body.fit-all #trackingStatusText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    body.fit-all #trackingFps { flex-shrink: 0; }
+    body.fit-all .video-wrap { flex: 1; min-height: 0; width: 50%; overflow: hidden; }
+    body.fit-all:not(.tracking-live) .video-wrap { visibility: hidden; }
+    body.fit-all #videoCanvas, body.fit-all #videoPreview { height: 100%; width: 100%; object-fit: contain; border-radius: 0; background: #0a171e; }
+    body.fit-all #overlayCanvas { object-fit: contain; }
+    body.fit-all .pose-readout { display: none !important; }
+    body.fit-all #recenterTracking {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      width: 100%;
+      padding: 5px;
+      border: 0;
+      background: transparent;
+      color: var(--hud);
+      cursor: pointer;
+      font: 600 10px Consolas, monospace;
+      letter-spacing: 1px;
     }
-    body.fit-all .btn .icon svg {
-      width: var(--fit-icon-size, 24px);
-      height: var(--fit-icon-size, 24px);
+    #recenterLabel { position: absolute; left: 53%; right: 4px; top: 45%; line-height: 1.4; font-size: 9px; letter-spacing: .4px; }
+    #trackingPlaceholder { position: absolute; inset: 18px 50% 8px 0; display: flex; justify-content: center; align-items: center; font-size: 24px; color: #587f88; }
+    body.tracking-live #trackingPlaceholder { display: none; }
+    #recenterTracking[aria-busy=""true""] { color: #ffe2a0; background: #20352b88; }
+    body.fit-all #edscToast { background: #183239 !important; color: #d2f7ed !important; border: 1px solid #719e9c; }
+    .empty-controls { color: #b2cecf; font-size: 13px; line-height: 1.5; }
+    @media (max-width: 600px) {
+      body.fit-all main { gap: 5px; padding: max(5px, env(safe-area-inset-top)) max(5px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom)) max(5px, env(safe-area-inset-left)); }
+      body.fit-all .toolbar::before { display: none; }
+      body.fit-all .toolbar button { flex: 1; padding: 4px; font-size: 10px; }
+      body.fit-all #cockpit { grid-template-columns: 62px minmax(0, 1fr) 62px; grid-template-rows: 62px minmax(0, 1fr) 90px; padding: 8px; gap: 7px; }
+      #navTop { padding: 0; }
+      .edge-rail { gap: 5px; }
+      .edge-key { font-size: 8px; letter-spacing: 0; padding: 6px 3px; }
+      body.fit-all #controlDisplay { padding: 7px; }
+      .display-heading { gap: 4px; padding-bottom: 7px; }
+      .display-heading small { font-size: 8px; letter-spacing: 1px; }
+      #categoryCount { font-size: 9px; }
+      body.fit-all #cockpitBottom { column-gap: 7px; grid-template-columns: minmax(0, 1fr) 132px; }
+      .display-footer { flex-wrap: wrap; gap: 4px; }
+      #deckStatus { width: 100%; font-size: 9px; }
+      .page-controls { margin-left: auto; }
     }
-    body.fit-all .btn small {
-      margin-top: 2px;
-      font-size: var(--fit-key-size, 8px);
-      line-height: 1;
+    @media (max-height: 500px) and (min-width: 601px) {
+      body.fit-all main { gap: 5px; padding-top: max(5px, env(safe-area-inset-top)); padding-bottom: max(5px, env(safe-area-inset-bottom)); }
+      body.fit-all #cockpit { grid-template-rows: 46px minmax(0, 1fr) 70px; gap: 7px; padding: 8px; }
+      .edge-key { font-size: 9px; padding: 4px; }
+      .edge-key::before { margin-bottom: 1px; font-size: 8px; }
+      body.fit-all #controlDisplay { padding: 6px 10px; }
+      .display-heading { padding-bottom: 5px; }
+      .display-heading small { display: none; }
+      #activeCategory { font-size: 13px; }
+      body.fit-all #grid { margin: 5px 0; }
+      .display-footer { padding-top: 3px; }
     }
+
   </style>
 </head>
 <body>
   <header>
-    <h1>EDSC Web Control</h1>
-    <p>Connected to your PC server</p>
+    <h1>EDSC Web Control <span class=""game-badge"" id=""gameBadge"">Elite Dangerous</span></h1>
+    <p id=""pageSubtitle"">Connected to your PC server</p>
   </header>
   <main>
     <div class=""status"" id=""status"">Loading buttons...</div>
     <div class=""toolbar"">
-      <button id=""reload"">Reload config</button>
       <button id=""fullscreen"">Fullscreen</button>
-      <button id=""fitAll"" aria-pressed=""false"">Fit all</button>
-      <button id=""blades"" aria-pressed=""false"">Blades</button>
+      <button id=""settingsBtn"" aria-pressed=""false"" aria-controls=""settingsPanel"">⚙ Settings</button>
       <button id=""voiceBtn"" class=""voice-btn"">🎤 Voice</button>
       <button id=""trackingBtn"" class=""tracking-btn"">📹 Face Tracking</button>
       <button id=""previewBtn"" aria-pressed=""true"" style=""display:none;"">⏹ Stop Preview</button>
     </div>
-    <label class=""tracking-mode"">
-      <input type=""checkbox"" id=""phoneModeToggle"">
-      <span>Track on phone (MediaPipe) - sends pose only, no video</span>
-    </label>
+    <!-- Settings drawer: the cockpit layout is the only layout, so the tracking options live here -->
+    <div id=""settingsPanel"" class=""settings-panel"">
+      <label class=""tracking-mode"">
+        <input type=""checkbox"" id=""phoneModeToggle"">
+        <span>Track on phone (MediaPipe) - sends pose only, no video</span>
+      </label>
+      <div class=""tracking-options"" id=""trackingOptions"">
+        <label>Camera
+          <select id=""camResSelect"">
+            <option value=""640x480"">640x480</option>
+            <option value=""480x360"">480x360 (faster)</option>
+            <option value=""320x240"">320x240 (fastest)</option>
+          </select>
+        </label>
+        <label>Mesh
+          <select id=""meshSelect"">
+            <option value=""outline"">Outline (faster)</option>
+            <option value=""full"">Full mesh</option>
+            <option value=""off"">Off</option>
+          </select>
+        </label>
+        <button id=""reload"" type=""button"">Reload config</button>
+      </div>
+      <div id=""settingsReadout"" class=""pose-readout settings-readout"" hidden></div>
+    </div>
     <div id=""trackingPanel"" class=""tracking-panel"" style=""display:none;"">
       <div class=""tracking-status"">
         <span id=""trackingStatusText"">Ready</span>
@@ -821,9 +1040,12 @@ namespace EDSC.Desktop.Services
         <video id=""videoPreview"" autoplay playsinline muted></video>
         <canvas id=""overlayCanvas"" width=""480"" height=""360""></canvas>
       </div>
+      <button id=""recenterTracking"" type=""button"" aria-label=""Recentre in-game head tracking"" aria-busy=""false"" title=""Look straight ahead, then tap to recentre"">
+        <span id=""trackingPlaceholder"" aria-hidden=""true"">⌖</span>
+        <span id=""recenterLabel"">⌖ RECENTRE</span>
+      </button>
       <div id=""poseReadout"" class=""pose-readout"" style=""display:none;""></div>
     </div>
-    <div id=""bladeNav"" role=""tablist"" aria-label=""Control categories""></div>
     <div id=""voiceFeedback"" class=""voice-feedback"" style=""display:none;"">
       <div class=""voice-status"">
         <span id=""voiceStatusIcon"">⚪</span>
@@ -832,144 +1054,181 @@ namespace EDSC.Desktop.Services
       <div class=""voice-transcript"" id=""voiceTranscript""></div>
       <div class=""voice-match"" id=""voiceMatch""></div>
     </div>
-    <div id=""grid""></div>
+    <div id=""cockpit"">
+      <nav id=""navTop"" class=""edge-rail cockpit-only"" aria-label=""Top control categories""></nav>
+      <nav id=""navLeft"" class=""edge-rail cockpit-only"" aria-label=""Left control categories""></nav>
+      <section id=""controlDisplay"" aria-label=""Flight controls"">
+        <div class=""display-heading cockpit-only"">
+          <div><small id=""deckGame"">ELITE DANGEROUS / CONTROLS</small><h2 id=""activeCategory"">Standby</h2></div>
+          <span id=""categoryCount"">00 / 00</span>
+        </div>
+        <div id=""grid""></div>
+        <div class=""display-footer cockpit-only"">
+          <span id=""deckStatus"" role=""status"">Loading controls…</span>
+          <div id=""commandPages"" class=""page-controls"" hidden>
+            <button id=""prevCommands"" type=""button"" aria-label=""Previous controls"">‹</button>
+            <span id=""commandPageLabel"">1 / 1</span>
+            <button id=""nextCommands"" type=""button"" aria-label=""Next controls"">›</button>
+          </div>
+        </div>
+      </section>
+      <nav id=""navRight"" class=""edge-rail cockpit-only"" aria-label=""Right control categories""></nav>
+      <div id=""cockpitBottom"" class=""cockpit-only"">
+        <nav id=""navBottom"" class=""edge-rail"" aria-label=""Bottom control categories""></nav>
+        <div id=""navBank"" hidden>
+          <span id=""navBankLabel"">BANK 1/1</span>
+          <div class=""page-controls"">
+            <button id=""prevBank"" type=""button"" aria-label=""Previous category bank"">‹</button>
+            <button id=""nextBank"" type=""button"" aria-label=""Next category bank"">›</button>
+          </div>
+        </div>
+        <div id=""trackingDock""></div>
+      </div>
+    </div>
   </main>
   <script>
     const statusEl = document.getElementById('status');
     const gridEl = document.getElementById('grid');
+    new MutationObserver(() => { document.getElementById('deckStatus').textContent = statusEl.textContent; }).observe(statusEl, { childList: true, characterData: true, subtree: true });
     const reloadBtn = document.getElementById('reload');
     const fullscreenBtn = document.getElementById('fullscreen');
-    const fitAllBtn = document.getElementById('fitAll');
-    const bladesBtn = document.getElementById('blades');
-    const bladeNavEl = document.getElementById('bladeNav');
+    const settingsBtn = document.getElementById('settingsBtn');
     const iconCache = new Map();
-    const FIT_ALL_STORAGE_KEY = 'edsc-fit-all';
-    const BLADES_STORAGE_KEY = 'edsc-blades';
-    let bladesEnabled = false;
-    let activeBladeIndex = 0;
+    const navRails = ['navTop', 'navLeft', 'navRight', 'navBottom'].map(id => document.getElementById(id));
+    const NAV_BANK_SIZE = 12;
+    let categories = [];
+    let activeCategoryIndex = 0;
+    let navBank = 0;
+    let commandPage = 0;
+    let commandPageCount = 1;
 
-    function setActiveBlade(index) {
+    function setActiveCategory(index) {
       const sections = Array.from(gridEl.querySelectorAll(':scope > .category'));
       if (!sections.length) return;
-
-      activeBladeIndex = (index + sections.length) % sections.length;
+      activeCategoryIndex = (index + sections.length) % sections.length;
+      commandPage = 0;
       sections.forEach((section, sectionIndex) => {
-        section.classList.toggle('active-blade', sectionIndex === activeBladeIndex);
+        section.classList.toggle('active-category', sectionIndex === activeCategoryIndex);
       });
-      Array.from(bladeNavEl.children).forEach((tab, tabIndex) => {
-        const selected = tabIndex === activeBladeIndex;
-        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-        tab.tabIndex = selected ? 0 : -1;
-      });
+      document.getElementById('activeCategory').textContent = categories[activeCategoryIndex];
+      document.getElementById('categoryCount').textContent = String(activeCategoryIndex + 1).padStart(2, '0') + ' / ' + String(categories.length).padStart(2, '0');
+      navBank = Math.floor(activeCategoryIndex / NAV_BANK_SIZE);
+      renderEdgeNavigation();
       requestAnimationFrame(updateFitLayout);
     }
 
-    function rebuildBladeNav(categories) {
-      bladeNavEl.innerHTML = '';
-      bladeNavEl.style.setProperty('--blade-count', String(Math.max(1, categories.length)));
-      const sections = Array.from(gridEl.querySelectorAll(':scope > .category'));
-      categories.forEach((category, index) => {
-        const tab = document.createElement('button');
-        tab.type = 'button';
-        tab.setAttribute('role', 'tab');
-        tab.textContent = category;
-        tab.title = category;
-        const firstButton = sections[index] && sections[index].querySelector('.btn');
-        tab.style.background = firstButton ? firstButton.style.background : '#374151';
-        tab.addEventListener('click', () => setActiveBlade(index));
-        bladeNavEl.appendChild(tab);
+    function renderEdgeNavigation() {
+      navRails.forEach(rail => rail.replaceChildren());
+      // Populate all four edges before adding another key to any edge.
+      const slots = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 0];
+      categories.slice(navBank * NAV_BANK_SIZE, (navBank + 1) * NAV_BANK_SIZE).forEach((category, slot) => {
+        const index = navBank * NAV_BANK_SIZE + slot;
+        const key = document.createElement('button');
+        key.type = 'button';
+        key.className = 'edge-key';
+        key.textContent = category;
+        key.title = category;
+        key.dataset.channel = 'SYS ' + String(index + 1).padStart(2, '0');
+        key.dataset.index = String(index);
+        key.setAttribute('aria-pressed', String(index === activeCategoryIndex));
+        key.setAttribute('aria-controls', 'grid');
+        key.addEventListener('click', () => {
+          setActiveCategory(index);
+          document.querySelector('.edge-key[data-index=""' + index + '""]')?.focus({ preventScroll: true });
+        });
+        navRails[slots[slot]].appendChild(key);
       });
-      setActiveBlade(Math.min(activeBladeIndex, Math.max(0, categories.length - 1)));
+      const bankCount = Math.max(1, Math.ceil(categories.length / NAV_BANK_SIZE));
+      document.getElementById('navBank').hidden = bankCount <= 1;
+      document.getElementById('navBankLabel').textContent = 'BANK ' + (navBank + 1) + '/' + bankCount;
+      document.getElementById('prevBank').disabled = navBank === 0;
+      document.getElementById('nextBank').disabled = navBank >= bankCount - 1;
     }
 
-    function setBlades(enabled, persist) {
-      bladesEnabled = enabled;
-      const active = enabled && document.body.classList.contains('fit-all');
-      document.body.classList.toggle('blades-mode', active);
-      bladesBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-      bladesBtn.textContent = enabled ? 'All icons' : 'Blades';
-      if (persist) {
-        try {
-          localStorage.setItem(BLADES_STORAGE_KEY, enabled ? '1' : '0');
-        } catch (err) {
-          // Storage is optional; the mode still works for this page load.
-        }
+    function rebuildEdgeNavigation(order) {
+      const previousCategory = categories[activeCategoryIndex];
+      categories = order;
+      navBank = 0;
+      renderEdgeNavigation();
+      if (order.length) {
+        setActiveCategory(Math.max(0, order.indexOf(previousCategory)));
+      } else {
+        activeCategoryIndex = 0;
+        document.getElementById('activeCategory').textContent = 'Standby';
+        document.getElementById('categoryCount').textContent = '00 / 00';
+        document.getElementById('commandPages').hidden = true;
       }
-      setActiveBlade(activeBladeIndex);
-      requestAnimationFrame(updateFitLayout);
     }
 
     function updateFitLayout() {
-      if (!document.body.classList.contains('fit-all')) {
-        gridEl.style.removeProperty('--fit-columns');
-        gridEl.style.removeProperty('--fit-icon-size');
-        gridEl.style.removeProperty('--fit-label-size');
-        gridEl.style.removeProperty('--fit-key-size');
-        gridEl.style.removeProperty('--fit-cell-size');
-        return;
+      const isFit = document.body.classList.contains('fit-all');
+      gridEl.querySelectorAll('.btn').forEach(button => { button.hidden = false; });
+      if (!isFit) return;
+      const scope = gridEl.querySelector('.category.active-category');
+      const buttons = scope ? Array.from(scope.querySelectorAll('.btn')) : [];
+      if (!buttons.length) return;
+
+      // Page large categories so touch targets stay readable in small landscape viewports.
+      const rect = gridEl.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      const gap = 6;
+      const minSize = 64;
+      const capacity = Math.max(1, Math.floor((width + gap) / (minSize + gap))) * Math.max(1, Math.floor((height + gap) / (minSize + gap)));
+      commandPageCount = Math.max(1, Math.ceil(buttons.length / capacity));
+      commandPage = Math.min(commandPage, commandPageCount - 1);
+      const count = Math.min(capacity, buttons.length - commandPage * capacity);
+      let columns = 1;
+      let size = 0;
+      for (let candidate = 1; candidate <= count; candidate++) {
+        const rows = Math.ceil(count / candidate);
+        const candidateSize = Math.min((width - gap * (candidate - 1)) / candidate, (height - gap * (rows - 1)) / rows);
+        if (candidateSize > size) { columns = candidate; size = candidateSize; }
       }
-
-      const isBlades = document.body.classList.contains('blades-mode');
-      const buttonScope = isBlades ? gridEl.querySelector('.category.active-blade') : gridEl;
-      const buttonCount = buttonScope ? buttonScope.querySelectorAll('.btn').length : 0;
-      if (!buttonCount) return;
-
-      const gap = 4;
-      const availableWidth = Math.max(240, window.innerWidth - 8);
-      const gridTop = gridEl.getBoundingClientRect().top;
-      const availableHeight = Math.max(160, window.innerHeight - gridTop - 4);
-      let columns = Math.max(2, Math.ceil(Math.sqrt(buttonCount * availableWidth / availableHeight)));
-      if (isBlades) {
-        columns = Math.max(columns, Math.ceil(availableWidth / 120));
-      }
-      columns = Math.min(columns, buttonCount);
-
-      function dimensionsFor(columnCount) {
-        const rows = Math.ceil(buttonCount / columnCount);
-        const cellSize = (availableWidth - gap * (columnCount - 1)) / columnCount;
-        return { rows, cellSize, height: rows * cellSize + gap * (rows - 1) };
-      }
-
-      let dimensions = dimensionsFor(columns);
-      while (columns < buttonCount && dimensions.height > availableHeight) {
-        columns += 1;
-        dimensions = dimensionsFor(columns);
-      }
-
-      const iconSize = Math.max(14, Math.min(32, Math.floor(dimensions.cellSize * 0.42)));
-      const labelSize = Math.max(7, Math.min(11, dimensions.cellSize * 0.13));
-      const keySize = Math.max(7, Math.min(9, dimensions.cellSize * 0.11));
-
+      size = Math.max(1, Math.min(150, size));
       gridEl.style.setProperty('--fit-columns', String(columns));
-      gridEl.style.setProperty('--fit-icon-size', iconSize + 'px');
-      gridEl.style.setProperty('--fit-label-size', labelSize.toFixed(1) + 'px');
-      gridEl.style.setProperty('--fit-key-size', keySize.toFixed(1) + 'px');
-      gridEl.style.setProperty('--fit-cell-size', Math.min(120, dimensions.cellSize).toFixed(1) + 'px');
+      gridEl.style.setProperty('--fit-cell-size', Math.floor(size) + 'px');
+      gridEl.style.setProperty('--fit-icon-size', Math.max(16, Math.min(44, size * .34)) + 'px');
+      gridEl.style.setProperty('--fit-label-size', Math.max(9, Math.min(13, size * .14)) + 'px');
+      buttons.forEach((button, index) => { button.hidden = index < commandPage * capacity || index >= (commandPage + 1) * capacity; });
+      document.getElementById('commandPages').hidden = commandPageCount <= 1;
+      document.getElementById('commandPageLabel').textContent = (commandPage + 1) + ' / ' + commandPageCount;
+      document.getElementById('prevCommands').disabled = commandPage === 0;
+      document.getElementById('nextCommands').disabled = commandPage >= commandPageCount - 1;
     }
 
-    function setFitAll(enabled, persist) {
-      document.body.classList.toggle('fit-all', enabled);
-      document.body.classList.toggle('blades-mode', enabled && bladesEnabled);
-      fitAllBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-      fitAllBtn.textContent = enabled ? 'Exit fit' : 'Fit all';
-      if (persist) {
-        try {
-          localStorage.setItem(FIT_ALL_STORAGE_KEY, enabled ? '1' : '0');
-        } catch (err) {
-          // Storage is optional; the mode still works for this page load.
-        }
-      }
+    // The cockpit layout is the only layout: the fit-all class is always on and the tracking
+    // panel always lives in its dock. The plain stacked layout's CSS is kept only as the base
+    // the cockpit rules build on.
+    function enterCockpitLayout() {
+      document.body.classList.add('fit-all');
+      document.getElementById('trackingDock').appendChild(document.getElementById('trackingPanel'));
       requestAnimationFrame(updateFitLayout);
     }
+    enterCockpitLayout();
 
-    try {
-      bladesEnabled = localStorage.getItem(BLADES_STORAGE_KEY) === '1';
-      setFitAll(localStorage.getItem(FIT_ALL_STORAGE_KEY) === '1', false);
-      setBlades(bladesEnabled, false);
-    } catch (err) {
-      setFitAll(false, false);
-      setBlades(false, false);
+    function setSettingsOpen(open) {
+      document.body.classList.toggle('settings-open', open);
+      settingsBtn.setAttribute('aria-pressed', String(open));
+      // The readout is hidden in the dock; mirror it into the drawer while it is open
+      document.getElementById('settingsReadout').hidden = !open || !tracking.isActive || !tracking.phoneMode;
+      requestAnimationFrame(updateFitLayout);
     }
+    settingsBtn.addEventListener('click', () => setSettingsOpen(!document.body.classList.contains('settings-open')));
+    new MutationObserver(() => {
+      const mirror = document.getElementById('settingsReadout');
+      mirror.textContent = document.getElementById('poseReadout').textContent;
+      mirror.hidden = !document.body.classList.contains('settings-open') || !tracking.isActive || !tracking.phoneMode;
+    }).observe(document.getElementById('poseReadout'), { childList: true, characterData: true, subtree: true });
+
+    document.getElementById('prevBank').addEventListener('click', () => { if (navBank > 0) { navBank--; renderEdgeNavigation(); } });
+    document.getElementById('nextBank').addEventListener('click', () => { if ((navBank + 1) * NAV_BANK_SIZE < categories.length) { navBank++; renderEdgeNavigation(); } });
+    document.getElementById('prevCommands').addEventListener('click', () => { commandPage = Math.max(0, commandPage - 1); updateFitLayout(); });
+    document.getElementById('nextCommands').addEventListener('click', () => { commandPage = Math.min(commandPageCount - 1, commandPage + 1); updateFitLayout(); });
+    // The display can change size when paging, tracking or the browser chrome changes.
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => requestAnimationFrame(updateFitLayout)).observe(gridEl);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', () => requestAnimationFrame(updateFitLayout));
+
 
     // Voice control state and configuration
     const voiceControl = {
@@ -1478,7 +1737,7 @@ namespace EDSC.Desktop.Services
           previewWanted = v.preview;
         }
 
-        const stamp = String(v.version) + ':' + String(v.updatedUtc);
+        const stamp = String(v.version) + ':' + String(v.updatedUtc) + ':' + String(v.game || '');
         if (configStamp !== null && stamp !== configStamp) {
           console.log('[Config] Layout changed on the PC, reloading');
           await loadConfig();
@@ -1489,16 +1748,45 @@ namespace EDSC.Desktop.Services
     }
     setInterval(checkConfigVersion, 3000);
 
+    // Per-game branding: title, badge and accent follow whichever game the PC has active
+    let currentGame = 'elite';
+    let currentGameName = 'Elite Dangerous';
+    function applyGameBranding(game, gameName) {
+      currentGame = game === 'starcitizen' ? 'starcitizen' : 'elite';
+      currentGameName = gameName || (currentGame === 'starcitizen' ? 'Star Citizen' : 'Elite Dangerous');
+      document.body.classList.toggle('game-starcitizen', currentGame === 'starcitizen');
+      document.body.classList.toggle('game-elite', currentGame !== 'starcitizen');
+      const badge = document.getElementById('gameBadge');
+      if (badge) {
+        badge.textContent = currentGameName;
+      }
+      const subtitle = document.getElementById('pageSubtitle');
+      if (subtitle) {
+        subtitle.textContent = currentGame === 'starcitizen'
+          ? 'Ship controls and head tracking for Star Citizen'
+          : 'Ship controls and head tracking for Elite Dangerous';
+      }
+      document.title = 'EDSC - ' + currentGameName;
+      document.getElementById('deckGame').textContent = currentGameName.toUpperCase() + ' / CONTROLS';
+    }
+
     async function loadConfig() {
       statusEl.textContent = 'Loading buttons...';
       gridEl.innerHTML = '';
       try {
         const res = await fetch('/config', { cache: 'no-store' });
         const config = await res.json();
-        configStamp = String(config.configVersion) + ':' + String(config.lastUpdatedUtc);
+        configStamp = String(config.configVersion) + ':' + String(config.lastUpdatedUtc) + ':' + String(config.game || '');
+        applyGameBranding(config.game, config.gameName);
         const buttons = (config && config.buttons) ? config.buttons : [];
         if (!buttons.length) {
-          statusEl.textContent = 'No buttons configured.';
+          voiceControl.buttons = [];
+          rebuildEdgeNavigation([]);
+          statusEl.textContent = 'No buttons configured for ' + currentGameName + '. Use Import on the PC.';
+          const empty = document.createElement('p');
+          empty.className = 'empty-controls';
+          empty.textContent = statusEl.textContent;
+          gridEl.appendChild(empty);
           return;
         }
         statusEl.textContent = `Loaded ${buttons.length} buttons`;
@@ -1527,12 +1815,14 @@ namespace EDSC.Desktop.Services
             const btn = document.createElement('button');
             btn.className = 'btn';
             btn.style.background = button.color || '#4caf50';
+            btn.style.setProperty('--button-accent', button.color || '#83c7bd');
+            btn.title = (button.label || button.id) + (button.key ? ' · ' + button.key : ' · not bound');
             const buttonSize = (button.size || 80) * 1.6;
             btn.style.width = buttonSize + 'px';
             btn.style.height = buttonSize + 'px';
             if (!button.key) {
               btn.classList.add('unbound');
-              btn.title = 'No keyboard key bound for this action in Elite Dangerous';
+              btn.title = 'No keyboard key bound for this action in ' + currentGameName;
             }
             const iconWrap = document.createElement('div');
             iconWrap.className = 'icon';
@@ -1545,6 +1835,7 @@ namespace EDSC.Desktop.Services
             }
 
             const label = document.createElement('div');
+            label.className = 'command-label';
             label.textContent = button.label || button.id;
 
             const key = document.createElement('small');
@@ -1559,10 +1850,16 @@ namespace EDSC.Desktop.Services
           section.appendChild(grid);
           gridEl.appendChild(section);
         }
-        rebuildBladeNav(order);
+        rebuildEdgeNavigation(order);
         requestAnimationFrame(updateFitLayout);
       } catch (err) {
-        statusEl.textContent = 'Failed to load config.';
+        rebuildEdgeNavigation([]);
+        statusEl.textContent = 'Failed to load config. Reconnect to the PC, then reload.';
+        const retry = document.createElement('button');
+        retry.className = 'edge-key';
+        retry.textContent = 'Retry connection';
+        retry.addEventListener('click', loadConfig);
+        gridEl.replaceChildren(retry);
       }
     }
 
@@ -1578,6 +1875,7 @@ namespace EDSC.Desktop.Services
           body: JSON.stringify({
             buttonId: button.id || '',
             key: button.key,
+            holdMs: button.holdMs > 0 ? button.holdMs : 0,
             timestamp: Date.now()
           })
         });
@@ -1593,37 +1891,6 @@ namespace EDSC.Desktop.Services
     }
 
     reloadBtn.addEventListener('click', loadConfig);
-    fitAllBtn.addEventListener('click', () => {
-      setFitAll(!document.body.classList.contains('fit-all'), true);
-    });
-    bladesBtn.addEventListener('click', () => {
-      setBlades(!bladesEnabled, true);
-    });
-    bladeNavEl.addEventListener('keydown', event => {
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault();
-        setActiveBlade(activeBladeIndex - 1);
-        bladeNavEl.children[activeBladeIndex]?.focus();
-      } else if (event.key === 'ArrowRight') {
-        event.preventDefault();
-        setActiveBlade(activeBladeIndex + 1);
-        bladeNavEl.children[activeBladeIndex]?.focus();
-      }
-    });
-    let bladeSwipeStartX = null;
-    gridEl.addEventListener('touchstart', event => {
-      if (document.body.classList.contains('blades-mode') && event.touches.length === 1) {
-        bladeSwipeStartX = event.touches[0].clientX;
-      }
-    }, { passive: true });
-    gridEl.addEventListener('touchend', event => {
-      if (bladeSwipeStartX === null || !document.body.classList.contains('blades-mode')) return;
-      const endX = event.changedTouches[0]?.clientX;
-      if (typeof endX === 'number' && Math.abs(endX - bladeSwipeStartX) > 45) {
-        setActiveBlade(activeBladeIndex + (endX < bladeSwipeStartX ? 1 : -1));
-      }
-      bladeSwipeStartX = null;
-    }, { passive: true });
     window.addEventListener('resize', () => requestAnimationFrame(updateFitLayout));
     document.addEventListener('fullscreenchange', () => {
       requestAnimationFrame(updateFitLayout);
@@ -1694,6 +1961,8 @@ namespace EDSC.Desktop.Services
     const MEDIAPIPE_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
     const MEDIAPIPE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
     const PHONE_MODE_KEY = 'edsc.trackOnPhone';
+    const CAM_RES_KEY = 'edsc.camRes';
+    const MESH_KEY = 'edsc.mesh';
     const phoneTracker = {
       vision: null,
       landmarker: null,
@@ -1703,10 +1972,74 @@ namespace EDSC.Desktop.Services
       vfc: null,
       lastVideoTime: -1,
       lostSent: false,
-      inferMs: 0
+      inferMs: 0,
+      stepMs: 0,
+      camInfo: '',
+      lastReadoutAt: 0,
+      overlayClear: true
     };
 
+    // Phone-side performance choices, remembered per device. The camera size feeds MediaPipe's
+    // texture upload and face detector; the mesh setting is pure drawing cost.
+    const trackingPrefs = { camRes: '640x480', mesh: 'outline' };
+    const MAX_OVERLAY_WIDTH = 480;
+    const READOUT_INTERVAL_MS = 125;
+
+    function readPref(key, fallback, allowed) {
+      try {
+        const value = localStorage.getItem(key);
+        return allowed.indexOf(value) >= 0 ? value : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    function writePref(key, value) {
+      try {
+        localStorage.setItem(key, value);
+      } catch (e) {
+        // Storage unavailable; the choice just will not persist
+      }
+    }
+
+    function initTrackingOptions() {
+      trackingPrefs.camRes = readPref(CAM_RES_KEY, '640x480', ['640x480', '480x360', '320x240']);
+      trackingPrefs.mesh = readPref(MESH_KEY, 'outline', ['full', 'outline', 'off']);
+
+      const camSelect = document.getElementById('camResSelect');
+      if (camSelect) {
+        camSelect.value = trackingPrefs.camRes;
+        camSelect.addEventListener('change', () => {
+          trackingPrefs.camRes = camSelect.value;
+          writePref(CAM_RES_KEY, camSelect.value);
+          if (tracking.isActive) {
+            stopTracking(true);
+            startTracking();
+          }
+        });
+      }
+
+      const meshSelect = document.getElementById('meshSelect');
+      if (meshSelect) {
+        meshSelect.value = trackingPrefs.mesh;
+        meshSelect.addEventListener('change', () => {
+          trackingPrefs.mesh = meshSelect.value;
+          writePref(MESH_KEY, meshSelect.value);
+          if (tracking.overlayCtx && tracking.overlay) {
+            tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+            phoneTracker.overlayClear = true;
+          }
+        });
+      }
+    }
+
+    let lastTrackingStatus = null;
     function setTrackingStatus(text) {
+      // Same text every frame would still invalidate layout; only touch the DOM on change
+      if (text === lastTrackingStatus) {
+        return;
+      }
+      lastTrackingStatus = text;
       document.getElementById('trackingStatusText').textContent = text;
     }
 
@@ -1720,7 +2053,10 @@ namespace EDSC.Desktop.Services
       tracking.canvas = document.getElementById('videoCanvas');
       tracking.ctx = tracking.canvas.getContext('2d', { willReadFrequently: true });
       tracking.overlay = document.getElementById('overlayCanvas');
-      tracking.overlayCtx = tracking.overlay.getContext('2d');
+      // desynchronized lets the browser skip a compositor copy for the overlay on Android
+      tracking.overlayCtx = tracking.overlay.getContext('2d', { desynchronized: true });
+
+      initTrackingOptions();
 
       const toggle = document.getElementById('phoneModeToggle');
       if (toggle) {
@@ -1834,8 +2170,20 @@ namespace EDSC.Desktop.Services
       const h = tracking.overlay.height;
       const FL = vision.FaceLandmarker;
 
+      if (trackingPrefs.mesh === 'off') {
+        if (!phoneTracker.overlayClear) {
+          ctx.clearRect(0, 0, w, h);
+          phoneTracker.overlayClear = true;
+        }
+        return;
+      }
+
       ctx.clearRect(0, 0, w, h);
-      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_TESSELATION, 'rgba(76, 175, 80, 0.35)', 0.6, w, h);
+      phoneTracker.overlayClear = false;
+      if (trackingPrefs.mesh === 'full') {
+        // ~2500 segments; the single biggest drawing cost, so it is opt-in
+        strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_TESSELATION, 'rgba(76, 175, 80, 0.35)', 0.6, w, h);
+      }
       strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_FACE_OVAL, '#4caf50', 1.5, w, h);
       strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_LEFT_EYE, '#60a5fa', 1.2, w, h);
       strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_RIGHT_EYE, '#60a5fa', 1.2, w, h);
@@ -1950,9 +2298,14 @@ namespace EDSC.Desktop.Services
         return;
       }
 
-      if (tracking.overlay.width !== w || tracking.overlay.height !== h) {
-        tracking.overlay.width = w;
-        tracking.overlay.height = h;
+      // The overlay is drawn at a capped size and stretched by CSS: landmarks are normalised,
+      // so a smaller canvas is only fewer pixels to rasterise, not a worse mesh.
+      const ow = Math.min(w, MAX_OVERLAY_WIDTH);
+      const oh = Math.max(1, Math.round(h * ow / w));
+      if (tracking.overlay.width !== ow || tracking.overlay.height !== oh) {
+        tracking.overlay.width = ow;
+        tracking.overlay.height = oh;
+        phoneTracker.overlayClear = true;
       }
 
       // Hand the video element straight to MediaPipe: it uploads the frame as a GPU texture,
@@ -1966,15 +2319,22 @@ namespace EDSC.Desktop.Services
         setTrackingStatus('Detect error: ' + err.message);
         return;
       }
-      phoneTracker.inferMs = phoneTracker.inferMs * 0.9 + (performance.now() - t0) * 0.1;
+      const t1 = performance.now();
+      phoneTracker.inferMs = phoneTracker.inferMs * 0.9 + (t1 - t0) * 0.1;
 
-      const readout = document.getElementById('poseReadout');
       const faces = result && result.faceLandmarks ? result.faceLandmarks : [];
       const matrices = result && result.facialTransformationMatrixes ? result.facialTransformationMatrixes : [];
+      const showReadout = t1 - phoneTracker.lastReadoutAt >= READOUT_INTERVAL_MS;
+      const readout = showReadout ? document.getElementById('poseReadout') : null;
+      if (showReadout) {
+        phoneTracker.lastReadoutAt = t1;
+      }
 
       if (faces.length > 0 && matrices.length > 0) {
         const pose = poseFromMatrix(matrices[0].data);
-        sendPhoneMessage({ t: 'pose', yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll, x: pose.x, y: pose.y, z: pose.z });
+        // ts is the phone's own clock at capture; the PC uses it to place the sample on a
+        // jitter-free timeline before resampling to the game's rate
+        sendPhoneMessage({ t: 'pose', yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll, x: pose.x, y: pose.y, z: pose.z, ts: t0 });
         phoneTracker.lostSent = false;
         updatePhoneFps();
         drawFaceMesh(faces[0]);
@@ -1988,21 +2348,28 @@ namespace EDSC.Desktop.Services
           readout.textContent =
             'yaw ' + pose.yaw.toFixed(1).padStart(6) + '°   pitch ' + pose.pitch.toFixed(1).padStart(6) + '°   roll ' + pose.roll.toFixed(1).padStart(6) + '°\n' +
             'x   ' + pose.x.toFixed(1).padStart(6) + 'cm  y     ' + pose.y.toFixed(1).padStart(6) + 'cm  z    ' + pose.z.toFixed(1).padStart(6) + 'cm\n' +
-            'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + '  ' + w + 'x' + h + '   ' + noseText;
+            'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + ', frame ' + phoneTracker.stepMs.toFixed(1) + ' ms   cam ' + phoneTracker.camInfo + '\n' +
+            noseText;
         }
         setTrackingStatus('Tracking on phone');
       } else {
-        tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+        if (!phoneTracker.overlayClear) {
+          tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+          phoneTracker.overlayClear = true;
+        }
         sendPhonePreview(video, w, h);
         if (!phoneTracker.lostSent) {
           sendPhoneMessage({ t: 'lost' });
           phoneTracker.lostSent = true;
         }
         if (readout) {
-          readout.textContent = 'No face detected\ninfer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate;
+          readout.textContent = 'No face detected\ninfer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + ', frame ' + phoneTracker.stepMs.toFixed(1) + ' ms   cam ' + phoneTracker.camInfo;
         }
         setTrackingStatus('Tracking on phone - no face');
       }
+
+      // Whole-step cost (inference plus drawing, sending and DOM), which is what sets the frame rate
+      phoneTracker.stepMs = phoneTracker.stepMs * 0.9 + (performance.now() - t0) * 0.1;
     }
 
     async function startTracking() {
@@ -2023,10 +2390,13 @@ namespace EDSC.Desktop.Services
         }
 
         // Get camera access
+        const camParts = String(trackingPrefs.camRes).split('x');
+        const camWidth = tracking.phoneMode ? (parseInt(camParts[0], 10) || 640) : 480;
+        const camHeight = tracking.phoneMode ? (parseInt(camParts[1], 10) || 480) : 360;
         const constraints = {
           video: {
-            width: { ideal: tracking.phoneMode ? 640 : 480 },
-            height: { ideal: tracking.phoneMode ? 480 : 360 },
+            width: { ideal: camWidth },
+            height: { ideal: camHeight },
             frameRate: { ideal: 30 },
             facingMode: 'user'
           }
@@ -2038,7 +2408,20 @@ namespace EDSC.Desktop.Services
 
         await tracking.video.play();
 
-        console.log('[Tracking] Camera started');
+        // What the camera actually agreed to: if this says 15 fps the room is too dark for
+        // the camera, and no amount of processing speed will help
+        try {
+          const settings = tracking.stream.getVideoTracks()[0].getSettings();
+          phoneTracker.camInfo = (settings.width || '?') + 'x' + (settings.height || '?') + '@' +
+            (settings.frameRate ? Math.round(settings.frameRate) : '?') + 'fps';
+        } catch (e) {
+          phoneTracker.camInfo = camWidth + 'x' + camHeight;
+        }
+        phoneTracker.stepMs = 0;
+        phoneTracker.lastReadoutAt = 0;
+        lastTrackingStatus = null;
+
+        console.log('[Tracking] Camera started', phoneTracker.camInfo);
 
         // Connect WebSocket: JPEG frames to /video, or poses to /pose
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -2075,6 +2458,7 @@ namespace EDSC.Desktop.Services
         };
 
         tracking.isActive = true;
+        document.body.classList.add('tracking-live');
         tracking.previewVisible = true;
         const previewBtn = document.getElementById('previewBtn');
         previewBtn.style.display = 'block';
@@ -2139,6 +2523,7 @@ namespace EDSC.Desktop.Services
       console.log('[Tracking] Stopping...');
 
       tracking.isActive = false;
+      document.body.classList.remove('tracking-live');
 
       if (tracking.frameInterval) {
         clearInterval(tracking.frameInterval);
@@ -2162,6 +2547,7 @@ namespace EDSC.Desktop.Services
 
       if (tracking.overlayCtx && tracking.overlay) {
         tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
+        phoneTracker.overlayClear = true;
       }
 
       if (tracking.ws) {
@@ -2191,6 +2577,7 @@ namespace EDSC.Desktop.Services
       previewBtn.style.display = 'none';
       previewBtn.setAttribute('aria-pressed', 'true');
       previewBtn.textContent = '⏹ Stop Preview';
+      lastTrackingStatus = null;
       document.getElementById('trackingStatusText').textContent = 'Ready';
       document.getElementById('trackingFps').textContent = '0 FPS';
       document.getElementById('poseReadout').style.display = 'none';
@@ -2214,6 +2601,37 @@ namespace EDSC.Desktop.Services
       previewBtn.textContent = tracking.previewVisible ? '⏹ Stop Preview' : '▶ Show Preview';
       requestAnimationFrame(updateFitLayout);
     }
+
+    // Use the same centring operation as the desktop's Center view control.
+    // A request starts a settling/averaging window; it is not an immediate completion.
+    document.getElementById('recenterTracking').addEventListener('click', async () => {
+      const button = document.getElementById('recenterTracking');
+      const label = document.getElementById('recenterLabel');
+      if (button.getAttribute('aria-busy') === 'true') return;
+      if (!tracking.isActive) { showToast('Start Face Tracking, then tap the preview to recentre.'); return; }
+      button.setAttribute('aria-busy', 'true');
+      label.textContent = 'SENDING…';
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        let res;
+        let data;
+        try {
+          res = await fetch('/tracking/center', { method: 'POST', signal: controller.signal });
+          data = await res.json();
+        } finally { clearTimeout(timeout); }
+        if (!res.ok || !data.success) throw new Error(data.message || 'Recentre request failed.');
+        label.textContent = 'LOOK STRAIGHT AHEAD';
+        statusEl.textContent = data.message;
+        showToast(data.message);
+        await new Promise(resolve => setTimeout(resolve, 4500));
+      } catch (err) {
+        showToast(err.name === 'AbortError' ? 'Recentre timed out. Check the PC connection.' : (err.message || 'Could not recentre.'));
+      } finally {
+        button.setAttribute('aria-busy', 'false');
+        label.textContent = '⌖ RECENTRE';
+      }
+    });
 
     // Initialize tracking
     initTracking();
@@ -2305,7 +2723,7 @@ namespace EDSC.Desktop.Services
 
                 // Execute keyboard command
                 Debug.WriteLine($"[HttpCommandServer] Simulating key press: {request.Key}");
-                await _keyboardService.SendKeyPressAsync(request.Key);
+                await _keyboardService.SendKeyPressAsync(request.Key, request.HoldMs);
 
                 Debug.WriteLine("[HttpCommandServer] Key press simulated successfully");
                 await SendResponse(context, true, $"Key '{request.Key}' pressed");
@@ -2564,10 +2982,11 @@ namespace EDSC.Desktop.Services
                         continue;
                     }
 
-                    var pose = ParsePhonePose(message.GetBuffer(), (int)message.Length, out bool lost);
+                    var pose = ParsePhonePose(message.GetBuffer(), (int)message.Length, out bool lost, out double? sourceTimestampMs);
 
                     if (lost)
                     {
+                        _poseOutput?.NotifyLost();
                         PhonePoseReceived?.Invoke(this, null);
                         PoseLost?.Invoke(this, EventArgs.Empty);
                         continue;
@@ -2594,7 +3013,7 @@ namespace EDSC.Desktop.Services
 
                     if (_poseOutput != null)
                     {
-                        await _poseOutput.SendPoseAsync(pose);
+                        await _poseOutput.SendPoseAsync(pose, sourceTimestampMs);
                     }
                 }
 
@@ -2618,14 +3037,16 @@ namespace EDSC.Desktop.Services
             }
             finally
             {
+                _poseOutput?.NotifyLost();
                 PhonePoseReceived?.Invoke(this, null);
                 PoseLost?.Invoke(this, EventArgs.Empty);
             }
         }
 
-        private static HeadPose? ParsePhonePose(byte[] buffer, int length, out bool lost)
+        private static HeadPose? ParsePhonePose(byte[] buffer, int length, out bool lost, out double? sourceTimestampMs)
         {
             lost = false;
+            sourceTimestampMs = null;
 
             try
             {
@@ -2667,6 +3088,14 @@ namespace EDSC.Desktop.Services
                     || double.IsNaN(pose.X) || double.IsNaN(pose.Y) || double.IsNaN(pose.Z))
                 {
                     return null;
+                }
+
+                // Capture time on the phone's clock (performance.now), used to place the sample on
+                // a jitter-free timeline for resampling
+                var ts = Read("ts");
+                if (!double.IsNaN(ts) && ts >= 0)
+                {
+                    sourceTimestampMs = ts;
                 }
 
                 return pose;
@@ -2711,6 +3140,7 @@ namespace EDSC.Desktop.Services
                     var pose = await _faceTrackingService.ProcessFrameAsync(frameData);
                     if (pose == null)
                     {
+                        _poseOutput?.NotifyLost();
                         PoseLost?.Invoke(this, EventArgs.Empty);
                         continue;
                     }

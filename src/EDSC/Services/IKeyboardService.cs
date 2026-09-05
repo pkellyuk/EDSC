@@ -14,6 +14,11 @@ namespace EDSC.Services
         Task SendKeyPressAsync(string key);
 
         /// <summary>
+        /// Simulate a key press held for a given time before release (0 = a normal tap)
+        /// </summary>
+        Task SendKeyPressAsync(string key, int holdMs);
+
+        /// <summary>
         /// Simulate a key down event
         /// </summary>
         Task SendKeyDownAsync(string key);

@@ -26,6 +26,7 @@ namespace EDSC.Desktop.ViewModels
         private string _iconSvg = string.Empty;
         private string _icon = string.Empty;
         private int _size = 80;
+        private int _holdMs;
         private bool _isSelected;
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -79,6 +80,21 @@ namespace EDSC.Desktop.ViewModels
             set { Set(ref _size, value <= 0 ? 80 : value, nameof(Size)); }
         }
 
+        /// <summary>
+        /// Milliseconds to hold the key down; 0 is a normal tap.
+        /// </summary>
+        public int HoldMs
+        {
+            get { return _holdMs; }
+            set
+            {
+                if (Set(ref _holdMs, Math.Clamp(value, 0, 5000), nameof(HoldMs)))
+                {
+                    Raise(nameof(KeyDisplay));
+                }
+            }
+        }
+
         private string _voiceAliases = string.Empty;
 
         /// <summary>
@@ -112,7 +128,15 @@ namespace EDSC.Desktop.ViewModels
 
         public string KeyDisplay
         {
-            get { return IsUnbound ? "not bound" : _key; }
+            get
+            {
+                if (IsUnbound)
+                {
+                    return "not bound";
+                }
+
+                return _holdMs > 0 ? $"{_key} (hold)" : _key;
+            }
         }
 
         public static ButtonItem FromConfig(ButtonConfig config)
@@ -126,6 +150,7 @@ namespace EDSC.Desktop.ViewModels
                 IconSvg = config.IconSvg,
                 Icon = config.Icon,
                 Size = config.Size,
+                HoldMs = config.HoldMs,
                 VoiceAliases = config.VoiceAliases != null ? string.Join(", ", config.VoiceAliases) : string.Empty
             };
         }
@@ -141,6 +166,7 @@ namespace EDSC.Desktop.ViewModels
                 IconSvg = IconSvg,
                 Icon = Icon,
                 Size = Size,
+                HoldMs = HoldMs,
                 VoiceAliases = SplitAliases(VoiceAliases),
                 Category = string.IsNullOrWhiteSpace(category) ? "General" : category.Trim()
             };
@@ -204,27 +230,37 @@ namespace EDSC.Desktop.ViewModels
     }
 
     /// <summary>
-    /// Drag-and-drop editor for the web control layout.
+    /// Drag-and-drop editor for the web control layout. One layout per game; the game selector
+    /// chooses which one is edited and which one the phone shows.
     /// </summary>
     public sealed class ButtonEditorViewModel : ViewModelBase
     {
+        private const string EliteDisplayName = "Elite Dangerous";
+        private const string StarCitizenDisplayName = "Star Citizen";
+
         private readonly IConfigurationService _configService;
         private readonly EliteBindingsService _eliteBindings;
+        private readonly StarCitizenBindingsService _starCitizenBindings;
         private AppConfig _config = new AppConfig();
         private ButtonItem? _selectedButton;
         private string _statusMessage = string.Empty;
         private string _newCategoryName = string.Empty;
         private bool _isDirty;
+        private string _selectedGame = EliteDisplayName;
+        private bool _switchingGame;
 
         public ObservableCollection<ButtonCategory> Categories { get; } = new ObservableCollection<ButtonCategory>();
         public ObservableCollection<string> AvailableIcons { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> Games { get; } = new ObservableCollection<string> { EliteDisplayName, StarCitizenDisplayName };
 
         public ICommand ReloadCommand { get; }
         public ICommand SaveCommand { get; }
         public ICommand AddCategoryCommand { get; }
         public ICommand AddButtonCommand { get; }
         public ICommand DeleteButtonCommand { get; }
+        public ICommand ImportCommand { get; }
         public ICommand ImportFromEliteCommand { get; }
+        public ICommand ImportFromStarCitizenCommand { get; }
         public ICommand BindInEliteCommand { get; }
 
         /// <summary>
@@ -232,10 +268,11 @@ namespace EDSC.Desktop.ViewModels
         /// </summary>
         public event EventHandler? Saved;
 
-        public ButtonEditorViewModel(IConfigurationService configService, EliteBindingsService eliteBindings)
+        public ButtonEditorViewModel(IConfigurationService configService, EliteBindingsService eliteBindings, StarCitizenBindingsService starCitizenBindings)
         {
             _configService = configService ?? throw new ArgumentNullException(nameof(configService));
             _eliteBindings = eliteBindings ?? throw new ArgumentNullException(nameof(eliteBindings));
+            _starCitizenBindings = starCitizenBindings ?? throw new ArgumentNullException(nameof(starCitizenBindings));
 
             ReloadCommand = new RelayCommand(LoadAsync, () => true);
             SaveCommand = new RelayCommand(SaveAsync, () => true);
@@ -243,11 +280,62 @@ namespace EDSC.Desktop.ViewModels
             AddButtonCommand = new RelayCommand(() => { AddButton(); return Task.CompletedTask; }, () => true);
             DeleteButtonCommand = new RelayCommand<ButtonItem>(item => { DeleteButton(item); return Task.CompletedTask; }, _ => true);
             ImportFromEliteCommand = new RelayCommand(ImportFromEliteAsync, () => true);
+            ImportFromStarCitizenCommand = new RelayCommand(ImportFromStarCitizenAsync, () => true);
+            ImportCommand = new RelayCommand(() => IsStarCitizen ? ImportFromStarCitizenAsync() : ImportFromEliteAsync(), () => true);
             BindInEliteCommand = new RelayCommand(BindInEliteAsync, () => true);
             ConfirmBindCommand = new RelayCommand(ConfirmBindAsync, () => true);
             CancelBindCommand = new RelayCommand(() => { CancelBind(); return Task.CompletedTask; }, () => true);
 
             LoadAvailableIcons();
+        }
+
+        /// <summary>
+        /// Display name of the game being edited. Changing it saves the choice straight away so the
+        /// phone switches layouts; button edits still wait for Save.
+        /// </summary>
+        public string SelectedGame
+        {
+            get { return _selectedGame; }
+            set
+            {
+                var next = value == StarCitizenDisplayName ? StarCitizenDisplayName : EliteDisplayName;
+                if (_selectedGame == next)
+                {
+                    return;
+                }
+
+                _selectedGame = next;
+                OnPropertyChanged(nameof(SelectedGame));
+                OnPropertyChanged(nameof(IsElite));
+                OnPropertyChanged(nameof(IsStarCitizen));
+                OnPropertyChanged(nameof(ImportButtonText));
+                OnPropertyChanged(nameof(ActiveGameId));
+
+                if (!_switchingGame)
+                {
+                    _ = SwitchGameAsync(ActiveGameId);
+                }
+            }
+        }
+
+        public string ActiveGameId
+        {
+            get { return _selectedGame == StarCitizenDisplayName ? GameIds.StarCitizen : GameIds.EliteDangerous; }
+        }
+
+        public bool IsElite
+        {
+            get { return ActiveGameId == GameIds.EliteDangerous; }
+        }
+
+        public bool IsStarCitizen
+        {
+            get { return ActiveGameId == GameIds.StarCitizen; }
+        }
+
+        public string ImportButtonText
+        {
+            get { return IsStarCitizen ? "Import from Star Citizen" : "Import from Elite Dangerous"; }
         }
 
         public ButtonItem? SelectedButton
@@ -337,9 +425,15 @@ namespace EDSC.Desktop.ViewModels
             try
             {
                 _config = await _configService.LoadConfigurationAsync() ?? new AppConfig();
-                Populate(_config.Buttons);
+                SetSelectedGameQuietly(GameIds.Normalize(_config.ActiveGame));
+                Populate(_config.GetButtons(ActiveGameId));
                 IsDirty = false;
-                StatusMessage = $"Loaded {Categories.Sum(c => c.Buttons.Count)} buttons in {Categories.Count} categories";
+                StatusMessage = $"{_selectedGame}: loaded {Categories.Sum(c => c.Buttons.Count)} buttons in {Categories.Count} categories";
+
+                if (Categories.Count == 0 && IsStarCitizen)
+                {
+                    await ImportFromStarCitizenAsync();
+                }
             }
             catch (Exception ex)
             {
@@ -348,28 +442,99 @@ namespace EDSC.Desktop.ViewModels
             }
         }
 
+        private void SetSelectedGameQuietly(string gameId)
+        {
+            _switchingGame = true;
+            try
+            {
+                SelectedGame = GameIds.Normalize(gameId) == GameIds.StarCitizen ? StarCitizenDisplayName : EliteDisplayName;
+            }
+            finally
+            {
+                _switchingGame = false;
+            }
+        }
+
+        /// <summary>
+        /// The buttons currently in the editor, as config objects.
+        /// </summary>
+        private List<ButtonConfig> CollectButtons()
+        {
+            var buttons = new List<ButtonConfig>();
+            foreach (var category in Categories)
+            {
+                foreach (var item in category.Buttons)
+                {
+                    if (string.IsNullOrWhiteSpace(item.Id))
+                    {
+                        item.Id = MakeId(item.Label);
+                    }
+
+                    buttons.Add(item.ToConfig(category.Name));
+                }
+            }
+
+            return buttons;
+        }
+
+        /// <summary>
+        /// Show the other game's layout. Unsaved edits to the current one are kept in memory and
+        /// written with the next Save; the active-game choice itself is saved immediately.
+        /// </summary>
+        private async Task SwitchGameAsync(string gameId)
+        {
+            try
+            {
+                var previous = GameIds.Normalize(_config.ActiveGame);
+                if (previous != gameId)
+                {
+                    _config.SetButtons(previous, CollectButtons());
+                }
+
+                _config.ActiveGame = gameId;
+                Populate(_config.GetButtons(gameId));
+
+                // Persist just the game choice so the phone follows; button lists on disk are untouched
+                var latest = await _configService.LoadConfigurationAsync() ?? new AppConfig();
+                latest.ActiveGame = gameId;
+                latest.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                latest.LastUpdatedBy = "desktop-editor";
+                latest.ConfigVersion = Math.Max(1, latest.ConfigVersion) + 1;
+                await _configService.SaveConfigurationAsync(latest);
+                _config.ConfigVersion = latest.ConfigVersion;
+                Saved?.Invoke(this, EventArgs.Empty);
+
+                var count = Categories.Sum(c => c.Buttons.Count);
+                StatusMessage = IsDirty
+                    ? $"Switched the phone to {_selectedGame}. Unsaved edits are kept; press Save to write both layouts."
+                    : $"Switched the phone to {_selectedGame} ({count} buttons).";
+
+                if (count == 0 && gameId == GameIds.StarCitizen)
+                {
+                    await ImportFromStarCitizenAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ButtonEditor] Game switch failed: {ex.Message}");
+                StatusMessage = $"Could not switch game: {ex.Message}";
+            }
+        }
+
         public async Task SaveAsync()
         {
             try
             {
-                var buttons = new List<ButtonConfig>();
-                foreach (var category in Categories)
-                {
-                    foreach (var item in category.Buttons)
-                    {
-                        if (string.IsNullOrWhiteSpace(item.Id))
-                        {
-                            item.Id = MakeId(item.Label);
-                        }
-
-                        buttons.Add(item.ToConfig(category.Name));
-                    }
-                }
+                var buttons = CollectButtons();
+                _config.SetButtons(ActiveGameId, buttons);
 
                 // Merge into the file on disk so tracking settings saved since we loaded are kept
                 var latest = await _configService.LoadConfigurationAsync() ?? _config;
-                latest.Buttons = buttons;
+                latest.Buttons = _config.Buttons;
+                latest.StarCitizenButtons = _config.StarCitizenButtons;
+                latest.ActiveGame = ActiveGameId;
                 latest.EliteControlSchemesPath = _config.EliteControlSchemesPath ?? latest.EliteControlSchemesPath;
+                latest.StarCitizenPath = _config.StarCitizenPath ?? latest.StarCitizenPath;
                 latest.LastUpdatedUtc = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 latest.LastUpdatedBy = "desktop-editor";
                 latest.ConfigVersion = Math.Max(1, latest.ConfigVersion) + 1;
@@ -377,7 +542,7 @@ namespace EDSC.Desktop.ViewModels
                 await _configService.SaveConfigurationAsync(latest);
                 _config = latest;
                 IsDirty = false;
-                StatusMessage = $"Saved {buttons.Count} buttons. The phone picks this up within a few seconds.";
+                StatusMessage = $"Saved {buttons.Count} {_selectedGame} buttons. The phone picks this up within a few seconds.";
                 Saved?.Invoke(this, EventArgs.Empty);
             }
             catch (Exception ex)
@@ -389,6 +554,12 @@ namespace EDSC.Desktop.ViewModels
 
         public async Task ImportFromEliteAsync()
         {
+            if (!IsElite)
+            {
+                SelectedGame = EliteDisplayName;
+                return;
+            }
+
             try
             {
                 StatusMessage = "Reading Elite Dangerous bindings...";
@@ -402,7 +573,7 @@ namespace EDSC.Desktop.ViewModels
                 }
 
                 // Work on the current editor state so unsaved edits are respected
-                _config.Buttons = Categories.SelectMany(c => c.Buttons.Select(b => b.ToConfig(c.Name))).ToList();
+                _config.Buttons = CollectButtons();
 
                 var summary = EliteBindingsService.ApplyToConfig(_config, result);
                 Populate(_config.Buttons);
@@ -414,6 +585,43 @@ namespace EDSC.Desktop.ViewModels
                 foreach (var note in result.Notes)
                 {
                     Debug.WriteLine($"[ButtonEditor] Elite import: {note}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ButtonEditor] Import failed: {ex.Message}");
+                StatusMessage = $"Import failed: {ex.Message}";
+            }
+        }
+
+        public async Task ImportFromStarCitizenAsync()
+        {
+            if (!IsStarCitizen)
+            {
+                SelectedGame = StarCitizenDisplayName;
+                return;
+            }
+
+            try
+            {
+                StatusMessage = "Reading Star Citizen bindings...";
+
+                var result = await Task.Run(() => _starCitizenBindings.Load(_config.StarCitizenPath));
+
+                _config.StarCitizenButtons = CollectButtons();
+
+                var summary = StarCitizenBindingsService.ApplyToConfig(_config, result);
+                Populate(_config.StarCitizenButtons);
+                IsDirty = true;
+
+                var fileNote = result.Found && result.File != null
+                    ? $"Rebinds read from {result.File}."
+                    : "actionmaps.xml was not found, so the game's stock keys are used; check any you have rebound.";
+                StatusMessage = $"{summary} {fileNote} Press Save to apply.";
+
+                foreach (var note in result.Notes)
+                {
+                    Debug.WriteLine($"[ButtonEditor] Star Citizen import: {note}");
                 }
             }
             catch (Exception ex)
@@ -465,6 +673,12 @@ namespace EDSC.Desktop.ViewModels
         /// </summary>
         public async Task BindInEliteAsync()
         {
+            if (!IsElite)
+            {
+                StatusMessage = "Binding missing keys is only available for Elite Dangerous.";
+                return;
+            }
+
             try
             {
                 IsBindPlanVisible = false;
@@ -534,7 +748,7 @@ namespace EDSC.Desktop.ViewModels
 
                 // Pick the new keys up straight away
                 var bindings = await Task.Run(() => _eliteBindings.Load(_config.EliteControlSchemesPath));
-                _config.Buttons = Categories.SelectMany(c => c.Buttons.Select(b => b.ToConfig(c.Name))).ToList();
+                _config.Buttons = CollectButtons();
                 EliteBindingsService.ApplyToConfig(_config, bindings);
                 Populate(_config.Buttons);
                 IsDirty = true;
@@ -633,6 +847,7 @@ namespace EDSC.Desktop.ViewModels
                 Key = string.Empty,
                 Color = "#4B5563"
             };
+            AttachDirtyTracking(item);
 
             target.Buttons.Add(item);
             SelectedButton = item;
@@ -676,6 +891,17 @@ namespace EDSC.Desktop.ViewModels
             IsDirty = true;
         }
 
+        private void AttachDirtyTracking(ButtonItem item)
+        {
+            item.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName != nameof(ButtonItem.IsSelected))
+                {
+                    IsDirty = true;
+                }
+            };
+        }
+
         private void Populate(IEnumerable<ButtonConfig>? buttons)
         {
             SelectedButton = null;
@@ -700,13 +926,7 @@ namespace EDSC.Desktop.ViewModels
                 }
 
                 var item = ButtonItem.FromConfig(config);
-                item.PropertyChanged += (_, args) =>
-                {
-                    if (args.PropertyName != nameof(ButtonItem.IsSelected))
-                    {
-                        IsDirty = true;
-                    }
-                };
+                AttachDirtyTracking(item);
                 category.Buttons.Add(item);
             }
 

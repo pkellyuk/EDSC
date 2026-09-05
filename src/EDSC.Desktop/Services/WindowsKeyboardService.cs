@@ -36,10 +36,22 @@ namespace EDSC.Desktop.Services
             Debug.WriteLine("[WindowsKeyboardService] Exit: Constructor");
         }
 
-        public async Task SendKeyPressAsync(string key)
+        public Task SendKeyPressAsync(string key)
         {
-            Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyPressAsync(key={key})");
-            LogToFile($"Entry: SendKeyPressAsync key={key}");
+            return SendKeyPressAsync(key, 0);
+        }
+
+        public async Task SendKeyPressAsync(string key, int holdMs)
+        {
+            Debug.WriteLine($"[WindowsKeyboardService] Entry: SendKeyPressAsync(key={key}, holdMs={holdMs})");
+            LogToFile($"Entry: SendKeyPressAsync key={key} holdMs={holdMs}");
+
+            // Long presses are capped so a bad value cannot wedge a key down for seconds
+            var pressMs = Math.Clamp(holdMs, 0, 5000);
+            if (pressMs < LongPressDelayMs)
+            {
+                pressMs = LongPressDelayMs;
+            }
 
             if (string.IsNullOrEmpty(key))
             {
@@ -92,7 +104,7 @@ namespace EDSC.Desktop.Services
                 }
 
                 SendKeyEvent(virtualKey.Value, keyUp: false, key);
-                await Task.Delay(LongPressDelayMs);
+                await Task.Delay(pressMs);
                 SendKeyEvent(virtualKey.Value, keyUp: true, key);
 
                 if (modifiers.Count > 0)

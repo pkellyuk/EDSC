@@ -17,7 +17,7 @@ namespace EDSC.Desktop
         public DesktopShellViewModel(ConnectionViewModel connectionViewModel, IConfigurationService configService)
         {
             Connection = connectionViewModel;
-            ButtonEditor = new ButtonEditorViewModel(configService, new EliteBindingsService());
+            ButtonEditor = new ButtonEditorViewModel(configService, new EliteBindingsService(), new StarCitizenBindingsService());
 
             Debug.WriteLine("[DesktopShellVM] Loading button editor");
             _ = ButtonEditor.LoadAsync();
