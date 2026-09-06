@@ -202,7 +202,7 @@
                         <TextBlock Grid.Row="6" Grid.Column="0" Text="Eye nudge up/down"
                                   ToolTip.Tip="Adds a fraction of your up/down eye movement to head pitch. Eyes move less vertically, so this usually wants a higher setting than left/right. 0% turns it off."
                                   FontSize="11" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <Slider Grid.Row="6" Grid.Column="1" Minimum="0" Maximum="2" SmallChange="0.05" LargeChange="0.1"
+                        <Slider Grid.Row="6" Grid.Column="1" Minimum="0" Maximum="5" SmallChange="0.05" LargeChange="0.25"
                                 Value="{Binding GazeNudgePitch}" Margin="0,0,8,0"/>
                         <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding GazeNudgePitch, StringFormat='{}{0:0%}'}"
                                   FontSize="11" Foreground="#10B981" VerticalAlignment="Center" MinWidth="44"/>

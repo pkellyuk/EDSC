@@ -448,8 +448,8 @@ namespace EDSC.Desktop
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
-            viewModel.GazeNudgeYaw = ClampGazeNudge(config.EffectiveGazeNudgeYaw);
-            viewModel.GazeNudgePitch = ClampGazeNudge(config.EffectiveGazeNudgePitch);
+            viewModel.GazeNudgeYaw = ClampGazeNudge(config.EffectiveGazeNudgeYaw, 2.0);
+            viewModel.GazeNudgePitch = ClampGazeNudge(config.EffectiveGazeNudgePitch, 5.0);
             viewModel.DirectOutputEnabled = config.DirectOutput;
             viewModel.ShowPcPreview = config.EffectiveShowPreview;
             viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
@@ -535,14 +535,14 @@ namespace EDSC.Desktop
             return Math.Clamp(value, TrackingScaleMin, TrackingScaleMax);
         }
 
-        private static double ClampGazeNudge(double value)
+        private static double ClampGazeNudge(double value, double max)
         {
             if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
             {
                 return 0.0;
             }
 
-            return Math.Clamp(value, 0.0, 2.0);
+            return Math.Clamp(value, 0.0, max);
         }
 
         /// <summary>

@@ -400,7 +400,7 @@ namespace EDSC.ViewModels
         }
 
         /// <summary>
-        /// Fraction of the up/down eye gaze angle added to head pitch, 0 to 2. Phone-side tracking only.
+        /// Fraction of the up/down eye gaze angle added to head pitch, 0 to 5. Phone-side tracking only.
         /// </summary>
         public double GazeNudgePitch
         {

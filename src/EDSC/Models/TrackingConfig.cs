@@ -36,7 +36,7 @@ namespace EDSC.Models
         public double? GazeNudgeYaw { get; set; }
 
         /// <summary>
-        /// How much of the up/down eye gaze angle is added to head pitch, 0 (off) to 2. Eyes move less
+        /// How much of the up/down eye gaze angle is added to head pitch, 0 (off) to 5. Eyes move less
         /// vertically than sideways, so this wants a higher setting than yaw for the same feel.
         /// </summary>
         [JsonPropertyName("gazeNudgePitch")]

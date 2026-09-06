@@ -166,7 +166,7 @@ namespace EDSC.Desktop.Services
             {
                 lock (_lock)
                 {
-                    _gazeNudgePitch = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 2.0);
+                    _gazeNudgePitch = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 5.0);
                 }
             }
         }
