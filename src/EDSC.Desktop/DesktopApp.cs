@@ -370,7 +370,7 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.RollScale)
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
                 || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
-                || propertyName == nameof(ConnectionViewModel.ShowPcPreview)
+                || propertyName == nameof(ConnectionViewModel.PreviewMode)
                 || propertyName == nameof(ConnectionViewModel.CenterHotkey);
         }
 
@@ -445,7 +445,7 @@ namespace EDSC.Desktop
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
             viewModel.DirectOutputEnabled = config.DirectOutput;
-            viewModel.ShowPcPreview = config.ShowPreview;
+            viewModel.PreviewMode = config.EffectivePreviewMode;
             viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
         }
 
@@ -457,6 +457,8 @@ namespace EDSC.Desktop
             if (_commandServer is HttpCommandServer httpServer)
             {
                 httpServer.PreviewEnabled = viewModel.ShowPcPreview;
+                httpServer.PreviewMode = ToPhonePreviewMode(viewModel.PreviewMode);
+                Debug.WriteLine($"[DesktopApp] Preview mode applied to server: {viewModel.PreviewMode}");
             }
 
             var hotkey = ParseHotkey(viewModel.CenterHotkey);
@@ -499,6 +501,7 @@ namespace EDSC.Desktop
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
             config.Tracking.ShowPreview = viewModel.ShowPcPreview;
+            config.Tracking.PreviewMode = viewModel.PreviewMode;
             config.Tracking.CenterHotkey = viewModel.CenterHotkey;
         }
 
@@ -692,40 +695,86 @@ namespace EDSC.Desktop
             }
         }
 
+        /// <summary>
+        /// The preview mode name the phone script understands (see the version poll in HttpCommandServer).
+        /// </summary>
+        private static string ToPhonePreviewMode(PreviewMode mode)
+        {
+            switch (mode)
+            {
+                case PreviewMode.Camera:
+                    return "camera";
+                case PreviewMode.LandmarksOnly:
+                    return "landmarksOnly";
+                default:
+                    return "cameraWithLandmarks";
+            }
+        }
+
+        // Outline topology for the 66-point landmark model: the iBUG 68-point layout minus the two
+        // inner mouth corners, so points 0-59 are the standard ones and the inner lip is 60-65.
+        private static readonly int[][] OpenLandmarkPaths = new[]
+        {
+            Enumerable.Range(0, 17).ToArray(),   // jaw
+            Enumerable.Range(17, 5).ToArray(),   // right brow
+            Enumerable.Range(22, 5).ToArray(),   // left brow
+            Enumerable.Range(27, 4).ToArray(),   // nose bridge
+            Enumerable.Range(31, 5).ToArray()    // nose base
+        };
+
+        private static readonly int[][] ClosedLandmarkPaths = new[]
+        {
+            Enumerable.Range(36, 6).ToArray(),   // right eye
+            Enumerable.Range(42, 6).ToArray(),   // left eye
+            Enumerable.Range(48, 12).ToArray(),  // outer lip
+            Enumerable.Range(60, 6).ToArray()    // inner lip
+        };
+
+        private const int OutlineLandmarkCount = 66;
+
+        /// <summary>
+        /// Build the preview panel image for one camera frame according to the selected preview mode.
+        /// Camera: the frame as-is. CameraWithLandmarks: the frame with the face box and mesh drawn over it.
+        /// LandmarksOnly: the face box and mesh on a black canvas the same size as the frame.
+        /// </summary>
+        private static Bitmap BuildPreviewBitmap(byte[] frameData, HeadPose? pose, PreviewMode mode)
+        {
+            if (frameData == null || frameData.Length == 0)
+            {
+                throw new ArgumentException("Frame data is empty", nameof(frameData));
+            }
+
+            var haveFace = pose != null && pose.FaceBox != null;
+
+            if (mode == PreviewMode.LandmarksOnly)
+            {
+                return DrawLandmarksOnly(frameData, haveFace ? pose : null);
+            }
+
+            if (mode == PreviewMode.CameraWithLandmarks && haveFace)
+            {
+                return DrawOverlays(frameData, pose!);
+            }
+
+            using (var ms = new MemoryStream(frameData))
+            {
+                return new Bitmap(ms);
+            }
+        }
+
         private static Bitmap DrawOverlays(byte[] frameData, HeadPose pose)
         {
+            if (frameData == null || pose == null)
+            {
+                throw new ArgumentNullException(frameData == null ? nameof(frameData) : nameof(pose));
+            }
+
             try
             {
                 using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
                 {
-                    image.Mutate(ctx =>
-                    {
-                        // Draw face bounding box (green rectangle)
-                        if (pose.FaceBox != null)
-                        {
-                            var faceBox = pose.FaceBox;
-                            var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
-                            ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
-                        }
-
-                        // Draw landmarks (small circles)
-                        if (pose.Landmarks != null)
-                        {
-                            foreach (var landmark in pose.Landmarks)
-                            {
-                                var point = new PointF(landmark.X, landmark.Y);
-                                ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(point, 3f));
-                            }
-                        }
-                    });
-
-                    // Convert to Avalonia Bitmap
-                    using (var ms = new MemoryStream())
-                    {
-                        image.SaveAsJpeg(ms);
-                        ms.Position = 0;
-                        return new Bitmap(ms);
-                    }
+                    image.Mutate(ctx => DrawFaceOverlay(ctx, pose));
+                    return ToAvaloniaBitmap(image);
                 }
             }
             catch (Exception ex)
@@ -737,6 +786,109 @@ namespace EDSC.Desktop
                     return new Bitmap(ms);
                 }
             }
+        }
+
+        /// <summary>
+        /// Draw the face box and mesh on a black canvas sized like the frame, without decoding the frame's pixels.
+        /// </summary>
+        private static Bitmap DrawLandmarksOnly(byte[] frameData, HeadPose? pose)
+        {
+            if (frameData == null)
+            {
+                throw new ArgumentNullException(nameof(frameData));
+            }
+
+            // Identify reads only the header, so this is far cheaper than decoding the JPEG
+            var info = SixLabors.ImageSharp.Image.Identify(frameData);
+            var width = info?.Width ?? 640;
+            var height = info?.Height ?? 480;
+
+            using (var image = new Image<Rgb24>(width, height, new Rgb24(0, 0, 0)))
+            {
+                if (pose != null)
+                {
+                    image.Mutate(ctx => DrawFaceOverlay(ctx, pose));
+                }
+
+                return ToAvaloniaBitmap(image);
+            }
+        }
+
+        private static Bitmap ToAvaloniaBitmap(Image<Rgb24> image)
+        {
+            if (image == null)
+            {
+                throw new ArgumentNullException(nameof(image));
+            }
+
+            using (var ms = new MemoryStream())
+            {
+                image.SaveAsJpeg(ms);
+                ms.Position = 0;
+                return new Bitmap(ms);
+            }
+        }
+
+        /// <summary>
+        /// Draw the face box (green) and the landmark outline (cyan lines, red points).
+        /// Falls back to plain dots when the landmark set is not the 66-point layout.
+        /// </summary>
+        private static void DrawFaceOverlay(IImageProcessingContext ctx, HeadPose pose)
+        {
+            if (ctx == null || pose == null)
+            {
+                return;
+            }
+
+            if (pose.FaceBox != null)
+            {
+                var faceBox = pose.FaceBox;
+                var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
+                ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
+            }
+
+            var landmarks = pose.Landmarks;
+            if (landmarks == null || landmarks.Length == 0)
+            {
+                return;
+            }
+
+            if (landmarks.Length < OutlineLandmarkCount)
+            {
+                Debug.WriteLine($"[DesktopApp] DrawFaceOverlay: {landmarks.Length} landmarks, drawing dots only");
+                foreach (var landmark in landmarks)
+                {
+                    ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(new PointF(landmark.X, landmark.Y), 3f));
+                }
+                return;
+            }
+
+            var outline = SixLabors.ImageSharp.Color.Cyan;
+            foreach (var path in OpenLandmarkPaths)
+            {
+                ctx.DrawLine(outline, 1.5f, ToPoints(landmarks, path));
+            }
+
+            foreach (var path in ClosedLandmarkPaths)
+            {
+                ctx.DrawPolygon(outline, 1.5f, ToPoints(landmarks, path));
+            }
+
+            foreach (var landmark in landmarks)
+            {
+                ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(new PointF(landmark.X, landmark.Y), 2f));
+            }
+        }
+
+        private static PointF[] ToPoints(LandmarkPoint[] landmarks, int[] indices)
+        {
+            var points = new PointF[indices.Length];
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var lm = landmarks[indices[i]];
+                points[i] = new PointF(lm.X, lm.Y);
+            }
+            return points;
         }
 
         private async Task<ServerConfig?> LoadConfigurationAsync()
@@ -1041,6 +1193,7 @@ namespace EDSC.Desktop
             }
 
             httpServer.PreviewEnabled = _connectionViewModel?.ShowPcPreview ?? true;
+            httpServer.PreviewMode = ToPhonePreviewMode(_connectionViewModel?.PreviewMode ?? PreviewMode.CameraWithLandmarks);
 
             httpServer.PoseDetected += (sender, pose) =>
             {
@@ -1146,21 +1299,7 @@ namespace EDSC.Desktop
                                 return;
                             }
 
-                            Bitmap bitmap;
-                            var pose = _lastPose;
-
-                            // Draw overlays if face was detected
-                            if (pose != null && pose.FaceBox != null)
-                            {
-                                bitmap = DrawOverlays(frameData, pose);
-                            }
-                            else
-                            {
-                                using (var ms = new MemoryStream(frameData))
-                                {
-                                    bitmap = new Bitmap(ms);
-                                }
-                            }
+                            var bitmap = BuildPreviewBitmap(frameData, _lastPose, viewModel.PreviewMode);
 
                             var fps = httpServer.GetCurrentFps();
                             viewModel.UpdateVideoFrame(bitmap, fps, _faceTrackingService?.LastStatus);

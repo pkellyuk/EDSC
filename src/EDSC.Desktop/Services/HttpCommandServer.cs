@@ -55,6 +55,13 @@ namespace EDSC.Desktop.Services
         public bool PreviewEnabled { get; set; } = true;
 
         /// <summary>
+        /// How the phone should compose the preview it sends: "camera" (video only),
+        /// "cameraWithLandmarks" (video plus mesh) or "landmarksOnly" (mesh on black).
+        /// Reported to the phone via the version poll alongside <see cref="PreviewEnabled"/>.
+        /// </summary>
+        public string PreviewMode { get; set; } = "cameraWithLandmarks";
+
+        /// <summary>
         /// Event fired when a new video frame is received
         /// </summary>
         public event EventHandler<byte[]>? FrameReceived;
@@ -431,7 +438,8 @@ namespace EDSC.Desktop.Services
                 updatedUtc = config.LastUpdatedUtc,
                 game = GameIds.Normalize(config.ActiveGame),
                 page = PageStamp,
-                preview = PreviewEnabled
+                preview = PreviewEnabled,
+                previewMode = PreviewMode
             }));
         }
 
@@ -1736,6 +1744,9 @@ namespace EDSC.Desktop.Services
         if (typeof v.preview === 'boolean') {
           previewWanted = v.preview;
         }
+        if (typeof v.previewMode === 'string') {
+          previewMode = v.previewMode;
+        }
 
         const stamp = String(v.version) + ':' + String(v.updatedUtc) + ':' + String(v.game || '');
         if (configStamp !== null && stamp !== configStamp) {
@@ -2203,6 +2214,7 @@ namespace EDSC.Desktop.Services
     let previewLastSent = 0;
     let previewBusy = false;
     let previewWanted = true;   // the PC can switch this off via the version poll
+    let previewMode = 'cameraWithLandmarks';   // camera | cameraWithLandmarks | landmarksOnly, from the version poll
 
     function sendPhonePreview(video, w, h) {
       if (!previewWanted) {
@@ -2225,8 +2237,15 @@ namespace EDSC.Desktop.Services
       }
 
       const ctx = previewCanvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, pw, ph);
-      ctx.drawImage(tracking.overlay, 0, 0, pw, ph);
+      if (previewMode === 'landmarksOnly') {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, pw, ph);
+      } else {
+        ctx.drawImage(video, 0, 0, pw, ph);
+      }
+      if (previewMode !== 'camera') {
+        ctx.drawImage(tracking.overlay, 0, 0, pw, ph);
+      }
 
       previewBusy = true;
       previewCanvas.toBlob((blob) => {

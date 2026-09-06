@@ -121,7 +121,8 @@ Settings persist in `config.json` under `tracking`:
     "rollScale": 1.0,
     "smoothingStrength": 0.5,
     "directOutput": true,
-    "showPreview": true
+    "showPreview": true,
+    "previewMode": "CameraWithLandmarks"
   }
 }
 ```

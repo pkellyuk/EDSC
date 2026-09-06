@@ -30,9 +30,34 @@ namespace EDSC.Models
 
         /// <summary>
         /// Show the camera preview in the desktop app. Off saves CPU on the PC and, in phone-tracking mode, on the phone.
+        /// Kept for older config files; <see cref="PreviewMode"/> takes precedence when present.
         /// </summary>
         [JsonPropertyName("showPreview")]
         public bool ShowPreview { get; set; } = true;
+
+        /// <summary>
+        /// What the desktop preview panel shows. Null in older config files, in which case <see cref="ShowPreview"/> decides.
+        /// </summary>
+        [JsonPropertyName("previewMode")]
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public PreviewMode? PreviewMode { get; set; }
+
+        /// <summary>
+        /// The preview mode to use, resolving the legacy <see cref="ShowPreview"/> flag when <see cref="PreviewMode"/> is absent.
+        /// </summary>
+        [JsonIgnore]
+        public PreviewMode EffectivePreviewMode
+        {
+            get
+            {
+                if (PreviewMode.HasValue)
+                {
+                    return PreviewMode.Value;
+                }
+
+                return ShowPreview ? Models.PreviewMode.CameraWithLandmarks : Models.PreviewMode.Off;
+            }
+        }
 
         /// <summary>
         /// Windows virtual key name for the re-centre hotkey (e.g. OEM_PLUS for "=", F12, NUMPAD0).

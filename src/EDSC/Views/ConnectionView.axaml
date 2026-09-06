@@ -191,13 +191,17 @@
                                   FontSize="11" Foreground="#10B981" VerticalAlignment="Center" MinWidth="44"/>
                     </Grid>
 
-                    <CheckBox IsChecked="{Binding ShowPcPreview}"
-                              FontSize="11"
-                              Foreground="#E5E7EB"
-                              Margin="0,6,0,0">
-                        <TextBlock Text="Show camera preview on PC (uses CPU; off also stops the phone sending it)"
-                                  TextWrapping="Wrap"/>
-                    </CheckBox>
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,6,0,0">
+                        <TextBlock Grid.Column="0" Text="Preview"
+                                  FontSize="11" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding PreviewModeOptions}"
+                                  SelectedItem="{Binding SelectedPreviewModeOption}"
+                                  DisplayMemberBinding="{Binding Label}"
+                                  ToolTip.Tip="What the face tracking preview panel shows. Camera modes use the most CPU on the PC. Face mesh only skips decoding the camera image. Off also stops the phone sending preview images."
+                                  FontSize="11"
+                                  HorizontalAlignment="Stretch"/>
+                    </Grid>
 
                     <Button Content="Reset tracking settings to defaults"
                             Command="{Binding ResetTrackingCommand}"

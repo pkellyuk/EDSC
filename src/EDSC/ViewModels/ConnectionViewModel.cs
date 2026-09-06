@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows.Input;
 using Avalonia.Media.Imaging;
+using EDSC.Models;
 
 namespace EDSC.ViewModels
 {
@@ -31,8 +32,9 @@ namespace EDSC.ViewModels
         private double _rollScale;
         private double _smoothingStrength;
 
-        // Preview toggle
-        private bool _showPcPreview = true;
+        // Preview mode (what the desktop preview panel shows)
+        private PreviewMode _previewMode = PreviewMode.CameraWithLandmarks;
+        private PreviewModeOption? _selectedPreviewModeOption;
 
         // Pose output properties
         private bool _directOutputEnabled;
@@ -372,23 +374,81 @@ namespace EDSC.ViewModels
         }
 
         /// <summary>
-        /// True to decode and show camera frames in the desktop preview panel.
+        /// The choices offered by the preview mode dropdown, in display order.
+        /// </summary>
+        public ObservableCollection<PreviewModeOption> PreviewModeOptions { get; } = new ObservableCollection<PreviewModeOption>
+        {
+            new PreviewModeOption(PreviewMode.Off, "Off (saves CPU; phone stops sending preview)"),
+            new PreviewModeOption(PreviewMode.Camera, "Camera only"),
+            new PreviewModeOption(PreviewMode.CameraWithLandmarks, "Camera with face mesh"),
+            new PreviewModeOption(PreviewMode.LandmarksOnly, "Face mesh only (no camera image)")
+        };
+
+        /// <summary>
+        /// The dropdown's selected entry. Bound by the view; changes flow through to <see cref="PreviewMode"/>.
+        /// </summary>
+        public PreviewModeOption? SelectedPreviewModeOption
+        {
+            get
+            {
+                return _selectedPreviewModeOption;
+            }
+            set
+            {
+                if (value == null || ReferenceEquals(_selectedPreviewModeOption, value))
+                {
+                    return;
+                }
+
+                Debug.WriteLine($"[ConnectionViewModel] SelectedPreviewModeOption -> {value.Mode}");
+                _selectedPreviewModeOption = value;
+                OnPropertyChanged(nameof(SelectedPreviewModeOption));
+                PreviewMode = value.Mode;
+            }
+        }
+
+        /// <summary>
+        /// What the desktop preview panel shows. Setting it also updates the dropdown selection.
+        /// </summary>
+        public PreviewMode PreviewMode
+        {
+            get
+            {
+                return _previewMode;
+            }
+            set
+            {
+                if (_previewMode == value)
+                {
+                    return;
+                }
+
+                Debug.WriteLine($"[ConnectionViewModel] PreviewMode {_previewMode} -> {value}");
+                _previewMode = value;
+                OnPropertyChanged(nameof(PreviewMode));
+                OnPropertyChanged(nameof(ShowPcPreview));
+
+                foreach (var option in PreviewModeOptions)
+                {
+                    if (option.Mode != value)
+                    {
+                        continue;
+                    }
+
+                    SelectedPreviewModeOption = option;
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when the preview panel shows anything at all (any mode other than Off).
         /// </summary>
         public bool ShowPcPreview
         {
             get
             {
-                return _showPcPreview;
-            }
-            set
-            {
-                if (_showPcPreview == value)
-                {
-                    return;
-                }
-
-                _showPcPreview = value;
-                OnPropertyChanged(nameof(ShowPcPreview));
+                return _previewMode != PreviewMode.Off;
             }
         }
 
@@ -641,6 +701,7 @@ namespace EDSC.ViewModels
 
             // Initialize video tracking properties
             _showVideoPreview = false;
+            _selectedPreviewModeOption = PreviewModeOptions[2];   // CameraWithLandmarks, matching _previewMode's default
             _videoFrameImage = null;
             _videoStatusText = "Waiting for video stream...";
             _videoFps = "0.0";
@@ -769,6 +830,27 @@ namespace EDSC.ViewModels
             }
 
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    /// <summary>
+    /// One entry in the preview mode dropdown: the mode plus its display text.
+    /// </summary>
+    public class PreviewModeOption
+    {
+        public PreviewModeOption(PreviewMode mode, string label)
+        {
+            Mode = mode;
+            Label = label ?? mode.ToString();
+        }
+
+        public PreviewMode Mode { get; }
+
+        public string Label { get; }
+
+        public override string ToString()
+        {
+            return Label;
         }
     }
 }
