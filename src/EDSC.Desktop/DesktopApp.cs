@@ -72,7 +72,7 @@ namespace EDSC.Desktop
                     var configService = new JsonConfigurationService();
 
                     var localIps = GetLocalIpAddresses();
-                    var selectedIp = localIps.FirstOrDefault() ?? "127.0.0.1";
+                    var selectedIp = ChooseStartupIp(localIps, _serverConfig.BindAddress);
 
                     // Initialize keyboard service
                     _keyboardService = new WindowsKeyboardService();
@@ -215,11 +215,15 @@ namespace EDSC.Desktop
                     desktop.MainWindow.Show();
                     desktop.MainWindow.Activate();
 
+                    // Select the remembered address before the change handler is attached, so the
+                    // startup selection neither rebinds the server it just started nor re-saves itself
                     connectionViewModel.SetLocalIpAddresses(localIps);
+                    connectionViewModel.SelectedLocalIpAddress = selectedIp;
                     connectionViewModel.LocalIpAddressChanged += (_, ip) =>
                     {
                         UpdateQrCode(connectionViewModel, ip, _serverConfig.Port);
                         _ = RebindCommandServerAsync(ip, _serverConfig.Port);
+                        _ = SaveBindAddressAsync(configService, ip);
                     };
                     UpdateQrCode(connectionViewModel, selectedIp, _serverConfig.Port);
 
@@ -369,7 +373,8 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
                 || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
                 || propertyName == nameof(ConnectionViewModel.ShowPcPreview)
-                || propertyName == nameof(ConnectionViewModel.GazeNudge)
+                || propertyName == nameof(ConnectionViewModel.GazeNudgeYaw)
+                || propertyName == nameof(ConnectionViewModel.GazeNudgePitch)
                 || propertyName == nameof(ConnectionViewModel.CenterHotkey);
         }
 
@@ -443,7 +448,8 @@ namespace EDSC.Desktop
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
-            viewModel.GazeNudge = ClampGazeNudge(config.GazeNudge);
+            viewModel.GazeNudgeYaw = ClampGazeNudge(config.EffectiveGazeNudgeYaw);
+            viewModel.GazeNudgePitch = ClampGazeNudge(config.EffectiveGazeNudgePitch);
             viewModel.DirectOutputEnabled = config.DirectOutput;
             viewModel.ShowPcPreview = config.EffectiveShowPreview;
             viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
@@ -483,7 +489,8 @@ namespace EDSC.Desktop
             poseRouter.PitchScale = viewModel.RotationScale;
             poseRouter.RollScale = viewModel.RollScale;
             poseRouter.SmoothingStrength = viewModel.SmoothingStrength;
-            poseRouter.GazeNudge = viewModel.GazeNudge;
+            poseRouter.GazeNudgeYaw = viewModel.GazeNudgeYaw;
+            poseRouter.GazeNudgePitch = viewModel.GazeNudgePitch;
             poseRouter.DirectOutputEnabled = viewModel.DirectOutputEnabled;
         }
 
@@ -499,7 +506,9 @@ namespace EDSC.Desktop
             config.Tracking.PitchScale = viewModel.RotationScale;
             config.Tracking.RollScale = viewModel.RollScale;
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
-            config.Tracking.GazeNudge = viewModel.GazeNudge;
+            config.Tracking.GazeNudgeYaw = viewModel.GazeNudgeYaw;
+            config.Tracking.GazeNudgePitch = viewModel.GazeNudgePitch;
+            config.Tracking.GazeNudge = null;   // legacy single value, superseded
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
             config.Tracking.ShowPreview = viewModel.ShowPcPreview;
             config.Tracking.PreviewMode = viewModel.ShowPcPreview ? PreviewMode.LandmarksOnly : PreviewMode.Off;
@@ -533,7 +542,7 @@ namespace EDSC.Desktop
                 return 0.0;
             }
 
-            return Math.Clamp(value, 0.0, 1.0);
+            return Math.Clamp(value, 0.0, 2.0);
         }
 
         /// <summary>
@@ -573,6 +582,73 @@ namespace EDSC.Desktop
             }
 
             return Math.Clamp(value, TrackingSmoothingMin, TrackingSmoothingMax);
+        }
+
+        /// <summary>
+        /// The address to bind at startup: the one saved in config if the PC still has it, else the first found.
+        /// </summary>
+        private static string ChooseStartupIp(string[] localIps, string? savedAddress)
+        {
+            var first = localIps?.FirstOrDefault() ?? "127.0.0.1";
+
+            if (string.IsNullOrWhiteSpace(savedAddress))
+            {
+                Debug.WriteLine($"[DesktopApp] No saved bind address, using {first}");
+                return first;
+            }
+
+            if (localIps != null && localIps.Contains(savedAddress))
+            {
+                Debug.WriteLine($"[DesktopApp] Using saved bind address {savedAddress}");
+                return savedAddress;
+            }
+
+            Debug.WriteLine($"[DesktopApp] Saved bind address {savedAddress} is not on this PC now, using {first}");
+            return first;
+        }
+
+        /// <summary>
+        /// Remember the chosen address in config, merging into whatever is on disk now.
+        /// </summary>
+        private async Task SaveBindAddressAsync(IConfigurationService configService, string ipAddress)
+        {
+            if (configService == null || string.IsNullOrWhiteSpace(ipAddress))
+            {
+                return;
+            }
+
+            try
+            {
+                var latest = await configService.LoadConfigurationAsync();
+                if (latest == null)
+                {
+                    Debug.WriteLine("[DesktopApp] SaveBindAddressAsync: no config on disk, not saving");
+                    return;
+                }
+
+                if (latest.Server == null)
+                {
+                    latest.Server = new ServerConfig();
+                }
+
+                if (latest.Server.BindAddress == ipAddress)
+                {
+                    return;
+                }
+
+                latest.Server.BindAddress = ipAddress;
+                if (_serverConfig != null)
+                {
+                    _serverConfig.BindAddress = ipAddress;
+                }
+
+                await configService.SaveConfigurationAsync(latest);
+                Debug.WriteLine($"[DesktopApp] Saved bind address {ipAddress}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DesktopApp] Error saving bind address: {ex.Message}");
+            }
         }
 
         private async Task RebindCommandServerAsync(string ipAddress, int port)

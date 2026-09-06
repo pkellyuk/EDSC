@@ -23,11 +23,51 @@ namespace EDSC.Models
         public double SmoothingStrength { get; set; } = 0.5;
 
         /// <summary>
-        /// How much of the eye gaze angle is added to the head angles, 0 (off) to 1 (the full eye angle).
-        /// Only phone-side tracking measures gaze. Applied after a small dead zone so a resting glance does nothing.
+        /// Legacy single gaze nudge from 2.0.5 config files. Read as the fallback for both axes; no longer written.
         /// </summary>
         [JsonPropertyName("gazeNudge")]
-        public double GazeNudge { get; set; } = 0.2;
+        public double? GazeNudge { get; set; }
+
+        /// <summary>
+        /// How much of the sideways eye gaze angle is added to head yaw, 0 (off) to 2 (twice the eye angle).
+        /// Only phone-side tracking measures gaze. Applied after a small dead zone so a resting glance does nothing.
+        /// </summary>
+        [JsonPropertyName("gazeNudgeYaw")]
+        public double? GazeNudgeYaw { get; set; }
+
+        /// <summary>
+        /// How much of the up/down eye gaze angle is added to head pitch, 0 (off) to 2. Eyes move less
+        /// vertically than sideways, so this wants a higher setting than yaw for the same feel.
+        /// </summary>
+        [JsonPropertyName("gazeNudgePitch")]
+        public double? GazeNudgePitch { get; set; }
+
+        public const double DefaultGazeNudgeYaw = 0.2;
+        public const double DefaultGazeNudgePitch = 0.6;
+
+        [JsonIgnore]
+        public double EffectiveGazeNudgeYaw
+        {
+            get
+            {
+                return GazeNudgeYaw ?? GazeNudge ?? DefaultGazeNudgeYaw;
+            }
+        }
+
+        [JsonIgnore]
+        public double EffectiveGazeNudgePitch
+        {
+            get
+            {
+                if (GazeNudgePitch.HasValue)
+                {
+                    return GazeNudgePitch.Value;
+                }
+
+                // An old single value was tuned by feel for yaw; vertical needs roughly three times as much
+                return GazeNudge.HasValue ? GazeNudge.Value * 3.0 : DefaultGazeNudgePitch;
+            }
+        }
 
         /// <summary>
         /// True to write pose straight into the game's TrackIR/FreeTrack interface instead of sending to Opentrack.

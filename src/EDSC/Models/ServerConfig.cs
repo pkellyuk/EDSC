@@ -19,6 +19,13 @@ namespace EDSC.Models
         [JsonPropertyName("autoStart")]
         public bool AutoStart { get; set; } = true;
 
+        /// <summary>
+        /// The local IP address chosen in the desktop app, so the same one is used after a restart.
+        /// Null or an address the PC no longer has falls back to the first address found.
+        /// </summary>
+        [JsonPropertyName("bindAddress")]
+        public string? BindAddress { get; set; }
+
         public ServerConfig()
         {
             // Explicit parameterless constructor with default values already set above
@@ -26,7 +33,7 @@ namespace EDSC.Models
 
         public override string ToString()
         {
-            return $"ServerConfig [Port={Port}, AutoStart={AutoStart}]";
+            return $"ServerConfig [Port={Port}, AutoStart={AutoStart}, BindAddress={BindAddress ?? "(first)"}]";
         }
     }
 }

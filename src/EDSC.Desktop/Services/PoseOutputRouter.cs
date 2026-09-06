@@ -73,8 +73,11 @@ namespace EDSC.Desktop.Services
 
         // Eye gaze. The phone omits gaze while the eyes are shut (a blink), so the last good value
         // is held rather than dropping to zero and back; that would read as a downward flick.
-        private const double GazeDeadZoneDegrees = 2.0;
-        private double _gazeNudge = 0.2;
+        // Eyes swing further sideways than up and down, so the vertical dead zone is smaller
+        private const double GazeYawDeadZoneDegrees = 2.0;
+        private const double GazePitchDeadZoneDegrees = 1.0;
+        private double _gazeNudgeYaw = 0.2;
+        private double _gazeNudgePitch = 0.6;
 
         // The nudge is meant to lead the view gently, never to react like the head does, so the
         // gaze gets its own plain low-pass (beta 0 = no speed adaptation) before it is added. A
@@ -127,22 +130,43 @@ namespace EDSC.Desktop.Services
         public double RollScale { get; set; } = 1.0;
 
         /// <summary>
-        /// Fraction of the eye gaze angle (past a small dead zone) added to head yaw and pitch. 0 disables.
+        /// Fraction of the sideways eye gaze angle (past a small dead zone) added to head yaw. 0 disables.
         /// </summary>
-        public double GazeNudge
+        public double GazeNudgeYaw
         {
             get
             {
                 lock (_lock)
                 {
-                    return _gazeNudge;
+                    return _gazeNudgeYaw;
                 }
             }
             set
             {
                 lock (_lock)
                 {
-                    _gazeNudge = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 1.0);
+                    _gazeNudgeYaw = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 2.0);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Fraction of the up/down eye gaze angle (past a small dead zone) added to head pitch. 0 disables.
+        /// </summary>
+        public double GazeNudgePitch
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _gazeNudgePitch;
+                }
+            }
+            set
+            {
+                lock (_lock)
+                {
+                    _gazeNudgePitch = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 2.0);
                 }
             }
         }
@@ -162,23 +186,33 @@ namespace EDSC.Desktop.Services
         }
 
         /// <summary>
-        /// Gaze angle to nudge: nothing inside the dead zone, then the excess scaled by the nudge gain.
+        /// Gaze angle to nudge: nothing inside the dead zone, then the excess scaled by the gain.
         /// Called under the lock.
         /// </summary>
-        private double Nudge(double gazeDegrees)
+        private double Nudge(double gazeDegrees, double deadZoneDegrees, double gain)
         {
-            if (!_haveGaze || _gazeNudge <= 0 || double.IsNaN(gazeDegrees))
+            if (!_haveGaze || gain <= 0 || double.IsNaN(gazeDegrees))
             {
                 return 0.0;
             }
 
             var magnitude = Math.Abs(gazeDegrees);
-            if (magnitude <= GazeDeadZoneDegrees)
+            if (magnitude <= deadZoneDegrees)
             {
                 return 0.0;
             }
 
-            return Math.Sign(gazeDegrees) * (magnitude - GazeDeadZoneDegrees) * _gazeNudge;
+            return Math.Sign(gazeDegrees) * (magnitude - deadZoneDegrees) * gain;
+        }
+
+        private double NudgeYaw(double gazeYawDegrees)
+        {
+            return Nudge(gazeYawDegrees, GazeYawDeadZoneDegrees, _gazeNudgeYaw);
+        }
+
+        private double NudgePitch(double gazePitchDegrees)
+        {
+            return Nudge(gazePitchDegrees, GazePitchDeadZoneDegrees, _gazeNudgePitch);
         }
 
         /// <summary>
@@ -556,8 +590,8 @@ namespace EDSC.Desktop.Services
                 // relative to the head and rests near zero when looking straight ahead
                 var smoothGazeYaw = _gazeYawFilter.Filter(_heldGazeYaw, now);
                 var smoothGazePitch = _gazePitchFilter.Filter(_heldGazePitch, now);
-                var nudgeYaw = Nudge(smoothGazeYaw);
-                var nudgePitch = Nudge(smoothGazePitch);
+                var nudgeYaw = NudgeYaw(smoothGazeYaw);
+                var nudgePitch = NudgePitch(smoothGazePitch);
                 opentrackPose = new HeadPose
                 {
                     X = pose.X,
@@ -846,8 +880,8 @@ namespace EDSC.Desktop.Services
                 var headPitch = sample.Pitch - center.Pitch;
                 var gazeYaw = _gazeYawFilter.Filter(sample.GazeYaw - center.GazeYaw, now);
                 var gazePitch = _gazePitchFilter.Filter(sample.GazePitch - center.GazePitch, now);
-                var nudgeYaw = Nudge(gazeYaw);
-                var nudgePitch = Nudge(gazePitch);
+                var nudgeYaw = NudgeYaw(gazeYaw);
+                var nudgePitch = NudgePitch(gazePitch);
 
                 x = _filters[0].Filter(sample.X - center.X, now);
                 y = _filters[1].Filter(sample.Y - center.Y, now);

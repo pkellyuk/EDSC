@@ -108,7 +108,7 @@ In direct mode the first pose sets the centre. Press **Center view** or the **=*
 
 The sliders scale movement after centring. Rotation at 1x is real degrees. Position at 1x is real centimetres, which is a small fraction of the TrackIR axis range, so try around 3x and adjust. **Smoothing** drives both the tracker's smoothing and, in direct mode, an adaptive filter that removes jitter at rest without adding lag in motion.
 
-**Eye nudge** adds a fraction of where your eyes are looking to the head direction, so a glance to the side leads the view a little without turning your head. Phone-side tracking measures gaze from the iris landmarks it already computes, so it costs nothing on the phone and adds two numbers to each pose message. A small dead zone means a resting glance does nothing. Blinks are detected early from the lid gap against each eye's normal opening and hold the last value, and the gaze gets its own gentle smoothing so it leads the view rather than jerking it. Head pitch is also held through each blink, because the face model tilts slightly as the lids move. 0% turns it off. The preview panel shows the irises, a ray from each eye in the direction of gaze, and an inset view window: green is the head, yellow is where the eyes look, and the white ring is what the game receives.
+**Eye nudge left/right** and **Eye nudge up/down** add a fraction of where your eyes are looking to the head direction, so a glance leads the view a little without turning your head. Eyes swing much less vertically than sideways, so up/down usually wants a higher setting (default 60% against 20%). Phone-side tracking measures gaze from the iris landmarks it already computes, so it costs nothing on the phone and adds two numbers to each pose message. A small dead zone means a resting glance does nothing. Blinks are detected early from the lid gap against each eye's normal opening and hold the last value, and the gaze gets its own gentle smoothing so it leads the view rather than jerking it. Head pitch is also held through each blink, because the face model tilts slightly as the lids move. 0% turns it off. The preview panel shows the irises, a ray from each eye in the direction of gaze, and an inset view window: green is the head, yellow is where the eyes look, and the white ring is what the game receives.
 
 **Show face mesh preview** draws the tracked face outline in the desktop panel. Only the mesh lines are sent from the phone (about 1 KB a frame); the camera image never leaves it. Turn the preview off to save a little CPU on both sides.
 
@@ -122,7 +122,8 @@ Settings persist in `config.json` under `tracking`:
     "pitchScale": 1.0,
     "rollScale": 1.0,
     "smoothingStrength": 0.5,
-    "gazeNudge": 0.2,
+    "gazeNudgeYaw": 0.2,
+    "gazeNudgePitch": 0.6,
     "directOutput": true,
     "showPreview": true,
     "previewMode": "LandmarksOnly"

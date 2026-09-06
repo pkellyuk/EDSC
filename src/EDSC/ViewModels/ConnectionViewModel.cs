@@ -31,7 +31,8 @@ namespace EDSC.ViewModels
         private double _rotationScale;
         private double _rollScale;
         private double _smoothingStrength;
-        private double _gazeNudge;
+        private double _gazeNudgeYaw;
+        private double _gazeNudgePitch;
         private GazeIndicator? _gazeIndicator;
 
         // Whether the desktop preview panel draws the face mesh
@@ -378,23 +379,44 @@ namespace EDSC.ViewModels
         }
 
         /// <summary>
-        /// Fraction of the eye gaze angle added to the head angles, 0 to 1. Phone-side tracking only.
+        /// Fraction of the sideways eye gaze angle added to head yaw, 0 to 2. Phone-side tracking only.
         /// </summary>
-        public double GazeNudge
+        public double GazeNudgeYaw
         {
             get
             {
-                return _gazeNudge;
+                return _gazeNudgeYaw;
             }
             set
             {
-                if (Math.Abs(_gazeNudge - value) < 0.0001)
+                if (Math.Abs(_gazeNudgeYaw - value) < 0.0001)
                 {
                     return;
                 }
 
-                _gazeNudge = value;
-                OnPropertyChanged(nameof(GazeNudge));
+                _gazeNudgeYaw = value;
+                OnPropertyChanged(nameof(GazeNudgeYaw));
+            }
+        }
+
+        /// <summary>
+        /// Fraction of the up/down eye gaze angle added to head pitch, 0 to 2. Phone-side tracking only.
+        /// </summary>
+        public double GazeNudgePitch
+        {
+            get
+            {
+                return _gazeNudgePitch;
+            }
+            set
+            {
+                if (Math.Abs(_gazeNudgePitch - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _gazeNudgePitch = value;
+                OnPropertyChanged(nameof(GazeNudgePitch));
             }
         }
 
@@ -699,7 +721,8 @@ namespace EDSC.ViewModels
             _rotationScale = 1.0;
             _rollScale = 1.0;
             _smoothingStrength = 0.5;
-            _gazeNudge = 0.2;
+            _gazeNudgeYaw = TrackingConfig.DefaultGazeNudgeYaw;
+            _gazeNudgePitch = TrackingConfig.DefaultGazeNudgePitch;
 
             // Initialize pose output properties
             _directOutputEnabled = false;
