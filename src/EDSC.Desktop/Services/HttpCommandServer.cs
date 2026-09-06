@@ -2131,8 +2131,112 @@ namespace EDSC.Desktop.Services
     // x right, y up, z toward the viewer, translation in centimetres. Convert to the same
     // convention the PC tracker uses: yaw + toward image-right, pitch + up, roll + when the
     // image-right side of the face drops, z + away from the camera.
+    const RAD2DEG = 180 / Math.PI;
+
+    // Eye gaze from the iris landmarks (468-472 and 473-477 of the 478-point model), which the
+    // landmarker already produces every frame, so this costs nothing extra to measure. Each iris
+    // centre is placed against its own eye: sideways along the corner-to-corner axis, up and down
+    // against the eyelid midpoint, both as a fraction of the eye width so distance from the camera
+    // drops out. The fraction becomes an angle through the eyeball (about 12 mm radius against a
+    // 30 mm eye opening). Positive yaw = looking to your own left, positive pitch = up, matching
+    // the head pose. A shut eye (lid gap under 12% of the width, a blink) is left out; with both
+    // shut no gaze is reported and the PC holds the last value.
+    const EYE_DEFS = [
+      { cornerA: 33, cornerB: 133, lidTop: 159, lidBottom: 145 },
+      { cornerA: 362, cornerB: 263, lidTop: 386, lidBottom: 374 }
+    ];
+    const IRIS_CENTRES = [468, 473];
+    const EYE_ANGLE_GAIN = 2.4;
+    const EYE_CLOSED_RATIO = 0.12;
+    const GAZE_RAY_PX_PER_DEG = 1.6;   // drawn ray length per degree, at 480 px frame width
+
+    function computeGaze(landmarks, w, h) {
+      if (!landmarks || landmarks.length < 478 || !w || !h) {
+        return null;
+      }
+      const clampUnit = (v) => Math.max(-1, Math.min(1, v));
+      let yawSum = 0;
+      let pitchSum = 0;
+      let count = 0;
+      const irisUsed = [];
+
+      for (let e = 0; e < EYE_DEFS.length; e++) {
+        const def = EYE_DEFS[e];
+        const a = landmarks[def.cornerA];
+        const b = landmarks[def.cornerB];
+        const top = landmarks[def.lidTop];
+        const bottom = landmarks[def.lidBottom];
+        if (!a || !b || !top || !bottom) {
+          continue;
+        }
+
+        // Pixel space, corners ordered image-left to image-right so +u is your own left
+        let ax = a.x * w, ay = a.y * h, bx = b.x * w, by = b.y * h;
+        if (bx < ax) {
+          const tx = ax, ty = ay;
+          ax = bx; ay = by; bx = tx; by = ty;
+        }
+        const width = Math.hypot(bx - ax, by - ay);
+        if (width < 4) {
+          continue;
+        }
+        const ux = (bx - ax) / width, uy = (by - ay) / width;
+        const vx = -uy, vy = ux;   // perpendicular, pointing down the image
+        const cornerMidX = (ax + bx) / 2, cornerMidY = (ay + by) / 2;
+
+        // The iris nearest this eye, so the pairing does not depend on landmark naming
+        let iris = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < IRIS_CENTRES.length; i++) {
+          const c = landmarks[IRIS_CENTRES[i]];
+          if (!c) {
+            continue;
+          }
+          const cx = c.x * w, cy = c.y * h;
+          const dist = Math.hypot(cx - cornerMidX, cy - cornerMidY);
+          if (dist < bestDist) {
+            bestDist = dist;
+            iris = { x: cx, y: cy };
+          }
+        }
+        if (!iris) {
+          continue;
+        }
+
+        const topX = top.x * w, topY = top.y * h, botX = bottom.x * w, botY = bottom.y * h;
+        const openness = ((botX - topX) * vx + (botY - topY) * vy) / width;
+        if (openness < EYE_CLOSED_RATIO) {
+          continue;
+        }
+
+        const lidMidX = (topX + botX) / 2, lidMidY = (topY + botY) / 2;
+        const hFrac = ((iris.x - cornerMidX) * ux + (iris.y - cornerMidY) * uy) / width;
+        const vFrac = ((iris.x - lidMidX) * vx + (iris.y - lidMidY) * vy) / width;
+        yawSum += Math.asin(clampUnit(hFrac * EYE_ANGLE_GAIN)) * RAD2DEG;
+        pitchSum -= Math.asin(clampUnit(vFrac * EYE_ANGLE_GAIN)) * RAD2DEG;
+        count++;
+        irisUsed.push(iris);
+      }
+
+      if (count === 0) {
+        return null;
+      }
+
+      const yaw = yawSum / count;
+      const pitch = pitchSum / count;
+
+      // One ray per open eye from the iris centre in the direction of gaze, normalised coordinates
+      const rayScale = GAZE_RAY_PX_PER_DEG * (w / 480);
+      const rays = [];
+      for (let i = 0; i < irisUsed.length; i++) {
+        const c = irisUsed[i];
+        rays.push(c.x / w, c.y / h, (c.x + yaw * rayScale) / w, (c.y - pitch * rayScale) / h);
+      }
+
+      return { yaw: yaw, pitch: pitch, rays: rays };
+    }
+
     function poseFromMatrix(d) {
-      const RAD2DEG = 180 / Math.PI;
       const fx = d[8], fy = d[9], fz = d[10];   // third column: face forward
       const rx = d[0], ry = d[1];               // first column: face right
       const clampUnit = (v) => Math.max(-1, Math.min(1, v));
@@ -2185,13 +2289,42 @@ namespace EDSC.Desktop.Services
           { conn: FL.FACE_LANDMARKS_FACE_OVAL, color: '#4caf50', width: 1.5, style: 0 },
           { conn: FL.FACE_LANDMARKS_LEFT_EYE, color: '#60a5fa', width: 1.2, style: 1 },
           { conn: FL.FACE_LANDMARKS_RIGHT_EYE, color: '#60a5fa', width: 1.2, style: 1 },
-          { conn: FL.FACE_LANDMARKS_LIPS, color: '#f87171', width: 1.2, style: 2 }
-        ]
+          { conn: FL.FACE_LANDMARKS_LIPS, color: '#f87171', width: 1.2, style: 2 },
+          { conn: irisRing(469), color: '#facc15', width: 1.2, style: 6 },
+          { conn: irisRing(474), color: '#facc15', width: 1.2, style: 6 }
+        ],
+        // Gaze rays are computed segments rather than landmark connections; segs is filled per frame
+        gaze: { segs: [], color: '#fbbf24', width: 2, style: 7 }
       };
       return meshGroupTable;
     }
 
-    function drawFaceMesh(landmarks) {
+    // The four ring points of an iris as a closed loop of connections
+    function irisRing(first) {
+      return [
+        { start: first, end: first + 1 },
+        { start: first + 1, end: first + 2 },
+        { start: first + 2, end: first + 3 },
+        { start: first + 3, end: first }
+      ];
+    }
+
+    // Explicit normalised segments (x1, y1, x2, y2, ...) as one stroke
+    function strokeSegments(ctx, segs, color, lineWidth, w, h) {
+      if (!segs || segs.length < 4) {
+        return;
+      }
+      ctx.beginPath();
+      for (let i = 0; i + 3 < segs.length; i += 4) {
+        ctx.moveTo(segs[i] * w, segs[i + 1] * h);
+        ctx.lineTo(segs[i + 2] * w, segs[i + 3] * h);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+
+    function drawFaceMesh(landmarks, gaze) {
       const ctx = tracking.overlayCtx;
       const groups = getMeshGroups();
       if (!ctx || !groups) {
@@ -2219,6 +2352,9 @@ namespace EDSC.Desktop.Services
         const g = groups.outline[i];
         strokeConnections(ctx, landmarks, g.conn, g.color, g.width, w, h);
       }
+      if (gaze && gaze.rays.length) {
+        strokeSegments(ctx, gaze.rays, groups.gaze.color, groups.gaze.width, w, h);
+      }
     }
 
     function sendPhoneMessage(obj) {
@@ -2239,7 +2375,7 @@ namespace EDSC.Desktop.Services
       return Math.max(0, Math.min(65535, Math.round(v * 65535)));
     }
 
-    function sendPhoneMesh(landmarks, w, h) {
+    function sendPhoneMesh(landmarks, w, h, gaze) {
       if (!previewWanted || !landmarks) {
         return;
       }
@@ -2259,10 +2395,15 @@ namespace EDSC.Desktop.Services
       meshLastSent = now;
 
       // Mesh 'off' on the phone still sends the outline: the PC panel is the check that tracking works
-      const list = full ? [groups.tessellation].concat(groups.outline) : groups.outline;
+      let list = full ? [groups.tessellation].concat(groups.outline) : groups.outline;
+      if (gaze && gaze.rays.length) {
+        groups.gaze.segs = gaze.rays;
+        list = list.concat([groups.gaze]);
+      }
       let bytes = 7;
       for (let i = 0; i < list.length; i++) {
-        bytes += 4 + list[i].conn.length * 8;
+        const g = list[i];
+        bytes += 4 + (g.conn ? g.conn.length * 8 : g.segs.length * 2);
       }
 
       const buf = new ArrayBuffer(bytes);
@@ -2276,17 +2417,25 @@ namespace EDSC.Desktop.Services
 
       for (let gi = 0; gi < list.length; gi++) {
         const g = list[gi];
-        const conn = g.conn;
         dv.setUint8(o++, g.style);
         dv.setUint8(o++, Math.round(g.width * 10));
-        dv.setUint16(o, conn.length, true); o += 2;
-        for (let i = 0; i < conn.length; i++) {
-          const a = landmarks[conn[i].start];
-          const b = landmarks[conn[i].end];
-          dv.setUint16(o, toU16(a ? a.x : 0), true); o += 2;
-          dv.setUint16(o, toU16(a ? a.y : 0), true); o += 2;
-          dv.setUint16(o, toU16(b ? b.x : 0), true); o += 2;
-          dv.setUint16(o, toU16(b ? b.y : 0), true); o += 2;
+        if (g.conn) {
+          const conn = g.conn;
+          dv.setUint16(o, conn.length, true); o += 2;
+          for (let i = 0; i < conn.length; i++) {
+            const a = landmarks[conn[i].start];
+            const b = landmarks[conn[i].end];
+            dv.setUint16(o, toU16(a ? a.x : 0), true); o += 2;
+            dv.setUint16(o, toU16(a ? a.y : 0), true); o += 2;
+            dv.setUint16(o, toU16(b ? b.x : 0), true); o += 2;
+            dv.setUint16(o, toU16(b ? b.y : 0), true); o += 2;
+          }
+        } else {
+          const segs = g.segs;
+          dv.setUint16(o, segs.length / 4, true); o += 2;
+          for (let i = 0; i < segs.length; i++) {
+            dv.setUint16(o, toU16(segs[i]), true); o += 2;
+          }
         }
       }
 
@@ -2383,22 +2532,33 @@ namespace EDSC.Desktop.Services
 
       if (faces.length > 0 && matrices.length > 0) {
         const pose = poseFromMatrix(matrices[0].data);
+        const gaze = computeGaze(faces[0], w, h);
         // ts is the phone's own clock at capture; the PC uses it to place the sample on a
-        // jitter-free timeline before resampling to the game's rate
-        sendPhoneMessage({ t: 'pose', yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll, x: pose.x, y: pose.y, z: pose.z, ts: t0 });
+        // jitter-free timeline before resampling to the game's rate. gy/gp are eye gaze relative
+        // to the head, left out while the eyes are shut so the PC holds the last value.
+        const msg = { t: 'pose', yaw: pose.yaw, pitch: pose.pitch, roll: pose.roll, x: pose.x, y: pose.y, z: pose.z, ts: t0 };
+        if (gaze) {
+          msg.gy = Math.round(gaze.yaw * 10) / 10;
+          msg.gp = Math.round(gaze.pitch * 10) / 10;
+        }
+        sendPhoneMessage(msg);
         phoneTracker.lostSent = false;
         updatePhoneFps();
-        drawFaceMesh(faces[0]);
-        sendPhoneMesh(faces[0], w, h);
+        drawFaceMesh(faces[0], gaze);
+        sendPhoneMesh(faces[0], w, h, gaze);
 
         if (readout) {
           // Nose tip position in the frame: if this stays near 50% while you move sideways,
           // the phone camera is auto-framing (Samsung 'Video call effects') and hiding the movement.
           const nose = faces[0][1];
           const noseText = nose ? ('nose in frame ' + Math.round(nose.x * 100) + '%, ' + Math.round(nose.y * 100) + '%') : '';
+          const gazeText = gaze
+            ? ('eyes yaw ' + gaze.yaw.toFixed(1).padStart(6) + '°   pitch ' + gaze.pitch.toFixed(1).padStart(6) + '°')
+            : 'eyes closed';
           readout.textContent =
             'yaw ' + pose.yaw.toFixed(1).padStart(6) + '°   pitch ' + pose.pitch.toFixed(1).padStart(6) + '°   roll ' + pose.roll.toFixed(1).padStart(6) + '°\n' +
             'x   ' + pose.x.toFixed(1).padStart(6) + 'cm  y     ' + pose.y.toFixed(1).padStart(6) + 'cm  z    ' + pose.z.toFixed(1).padStart(6) + 'cm\n' +
+            gazeText + '\n' +
             'infer ' + phoneTracker.inferMs.toFixed(1) + ' ms on ' + phoneTracker.delegate + ', frame ' + phoneTracker.stepMs.toFixed(1) + ' ms   cam ' + phoneTracker.camInfo + '\n' +
             noseText;
         }
@@ -3011,8 +3171,9 @@ namespace EDSC.Desktop.Services
 
         /// <summary>
         /// Receives poses computed on the phone by MediaPipe as small JSON text messages:
-        /// {"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..} or {"t":"lost"}.
+        /// {"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..,"gy":..,"gp":..} or {"t":"lost"}.
         /// Angles in degrees, translation in centimetres, same conventions as the PC tracker.
+        /// gy and gp are eye gaze yaw and pitch relative to the head and are absent while the eyes are shut.
         /// </summary>
         private async Task HandlePoseWebSocket(HttpContext context)
         {
@@ -3204,6 +3365,16 @@ namespace EDSC.Desktop.Services
                     || double.IsNaN(pose.X) || double.IsNaN(pose.Y) || double.IsNaN(pose.Z))
                 {
                     return null;
+                }
+
+                // Eye gaze relative to the head; the phone leaves it out while the eyes are closed
+                var gazeYaw = Read("gy");
+                var gazePitch = Read("gp");
+                if (!double.IsNaN(gazeYaw) && !double.IsNaN(gazePitch))
+                {
+                    pose.HasGaze = true;
+                    pose.GazeYaw = gazeYaw;
+                    pose.GazePitch = gazePitch;
                 }
 
                 // Capture time on the phone's clock (performance.now), used to place the sample on

@@ -23,6 +23,13 @@ namespace EDSC.Models
         public double SmoothingStrength { get; set; } = 0.5;
 
         /// <summary>
+        /// How much of the eye gaze angle is added to the head angles, 0 (off) to 1 (the full eye angle).
+        /// Only phone-side tracking measures gaze. Applied after a small dead zone so a resting glance does nothing.
+        /// </summary>
+        [JsonPropertyName("gazeNudge")]
+        public double GazeNudge { get; set; } = 0.2;
+
+        /// <summary>
         /// True to write pose straight into the game's TrackIR/FreeTrack interface instead of sending to Opentrack.
         /// </summary>
         [JsonPropertyName("directOutput")]

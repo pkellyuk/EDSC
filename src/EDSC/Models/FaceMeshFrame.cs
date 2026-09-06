@@ -88,6 +88,40 @@ namespace EDSC.Models
         FaceBox = 4,
 
         /// <summary>Nose bridge and base.</summary>
-        Nose = 5
+        Nose = 5,
+
+        /// <summary>Iris rings.</summary>
+        Iris = 6,
+
+        /// <summary>Gaze rays from each iris in the direction the eyes look.</summary>
+        Gaze = 7
+    }
+
+    /// <summary>
+    /// Where the head points and where the eyes look, for the small view-window drawn in the
+    /// preview panel. Angles in degrees relative to the centred pose, positive left and up.
+    /// </summary>
+    public sealed class GazeIndicator
+    {
+        /// <summary>Head yaw after centring.</summary>
+        public double HeadYaw { get; set; }
+
+        /// <summary>Head pitch after centring.</summary>
+        public double HeadPitch { get; set; }
+
+        /// <summary>True when eye gaze is being measured.</summary>
+        public bool HasGaze { get; set; }
+
+        /// <summary>Eye yaw relative to the head, after centring.</summary>
+        public double GazeYaw { get; set; }
+
+        /// <summary>Eye pitch relative to the head, after centring.</summary>
+        public double GazePitch { get; set; }
+
+        /// <summary>The yaw the gaze nudge adds to the output.</summary>
+        public double NudgeYaw { get; set; }
+
+        /// <summary>The pitch the gaze nudge adds to the output.</summary>
+        public double NudgePitch { get; set; }
     }
 }

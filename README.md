@@ -108,6 +108,8 @@ In direct mode the first pose sets the centre. Press **Center view** or the **=*
 
 The sliders scale movement after centring. Rotation at 1x is real degrees. Position at 1x is real centimetres, which is a small fraction of the TrackIR axis range, so try around 3x and adjust. **Smoothing** drives both the tracker's smoothing and, in direct mode, an adaptive filter that removes jitter at rest without adding lag in motion.
 
+**Eye nudge** adds a fraction of where your eyes are looking to the head direction, so a glance to the side leads the view a little without turning your head. Phone-side tracking measures gaze from the iris landmarks it already computes, so it costs nothing on the phone and adds two numbers to each pose message. A small dead zone means a resting glance does nothing, and a blink holds the last value. 0% turns it off. The preview panel shows the irises, a ray from each eye in the direction of gaze, and an inset view window: green is the head, yellow is where the eyes look, and the white ring is what the game receives.
+
 **Show face mesh preview** draws the tracked face outline in the desktop panel. Only the mesh lines are sent from the phone (about 1 KB a frame); the camera image never leaves it. Turn the preview off to save a little CPU on both sides.
 
 Settings persist in `config.json` under `tracking`:
@@ -120,6 +122,7 @@ Settings persist in `config.json` under `tracking`:
     "pitchScale": 1.0,
     "rollScale": 1.0,
     "smoothingStrength": 0.5,
+    "gazeNudge": 0.2,
     "directOutput": true,
     "showPreview": true,
     "previewMode": "LandmarksOnly"
@@ -168,7 +171,7 @@ SVG icons are served from `src/EDSC.Desktop/Assets/Icons`. The `server.port` set
 | WS | `/video` | JPEG frames from the phone for PC-side tracking |
 | WS | `/pose` | Poses (JSON) and face mesh frames (binary line segments) from phone-side tracking |
 
-Pose messages are `{"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..}` in degrees and centimetres, or `{"t":"lost"}`.
+Pose messages are `{"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..,"gy":..,"gp":..}` in degrees and centimetres, or `{"t":"lost"}`. `gy` and `gp` are eye gaze yaw and pitch relative to the head and are omitted while the eyes are closed.
 
 ## Project Structure
 

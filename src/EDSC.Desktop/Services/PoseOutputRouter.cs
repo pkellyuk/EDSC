@@ -55,7 +55,30 @@ namespace EDSC.Desktop.Services
         {
             public double T;
             public double X, Y, Z, Yaw, Pitch, Roll;
+            public double GazeYaw, GazePitch;
         }
+
+        /// <summary>
+        /// What the router last produced, for the preview panel: head direction after centring,
+        /// where the eyes look relative to it, and the nudge that was added. Degrees.
+        /// </summary>
+        public struct OutputSnapshot
+        {
+            public bool Valid;
+            public double Yaw, Pitch;
+            public bool HasGaze;
+            public double GazeYaw, GazePitch;
+            public double NudgeYaw, NudgePitch;
+        }
+
+        // Eye gaze. The phone omits gaze while the eyes are shut (a blink), so the last good value
+        // is held rather than dropping to zero and back; that would read as a downward flick.
+        private const double GazeDeadZoneDegrees = 2.0;
+        private double _gazeNudge = 0.2;
+        private bool _haveGaze;
+        private double _heldGazeYaw;
+        private double _heldGazePitch;
+        private OutputSnapshot _lastOutput;
 
         private readonly Sample[] _ring = new Sample[RingSize];
         private int _ringCount;
@@ -86,6 +109,76 @@ namespace EDSC.Desktop.Services
         public double RollScale { get; set; } = 1.0;
 
         /// <summary>
+        /// Fraction of the eye gaze angle (past a small dead zone) added to head yaw and pitch. 0 disables.
+        /// </summary>
+        public double GazeNudge
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _gazeNudge;
+                }
+            }
+            set
+            {
+                lock (_lock)
+                {
+                    _gazeNudge = double.IsNaN(value) ? 0.0 : Math.Clamp(value, 0.0, 1.0);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The most recent output directions, for the preview panel.
+        /// </summary>
+        public OutputSnapshot LastOutput
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lastOutput;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gaze angle to nudge: nothing inside the dead zone, then the excess scaled by the nudge gain.
+        /// Called under the lock.
+        /// </summary>
+        private double Nudge(double gazeDegrees)
+        {
+            if (!_haveGaze || _gazeNudge <= 0 || double.IsNaN(gazeDegrees))
+            {
+                return 0.0;
+            }
+
+            var magnitude = Math.Abs(gazeDegrees);
+            if (magnitude <= GazeDeadZoneDegrees)
+            {
+                return 0.0;
+            }
+
+            return Math.Sign(gazeDegrees) * (magnitude - GazeDeadZoneDegrees) * _gazeNudge;
+        }
+
+        /// <summary>
+        /// Remember the latest measured gaze so a blink holds the last value. Called under the lock.
+        /// </summary>
+        private void HoldGaze(HeadPose pose)
+        {
+            if (pose == null || !pose.HasGaze)
+            {
+                return;
+            }
+
+            _heldGazeYaw = pose.GazeYaw;
+            _heldGazePitch = pose.GazePitch;
+            _haveGaze = true;
+        }
+
+        /// <summary>
         /// Apply the sensitivity scales. The PC tracker scales its own output, so this is only
         /// for poses computed elsewhere.
         /// </summary>
@@ -105,7 +198,10 @@ namespace EDSC.Desktop.Services
                 Pitch = pose.Pitch * PitchScale,
                 Roll = pose.Roll * RollScale,
                 FaceBox = pose.FaceBox,
-                Landmarks = pose.Landmarks
+                Landmarks = pose.Landmarks,
+                HasGaze = pose.HasGaze,
+                GazeYaw = pose.GazeYaw,
+                GazePitch = pose.GazePitch
             };
         }
 
@@ -294,9 +390,12 @@ namespace EDSC.Desktop.Services
             bool direct;
             double now = _clock.Elapsed.TotalSeconds;
 
+            HeadPose opentrackPose;
+
             lock (_lock)
             {
                 direct = _directOutputEnabled;
+                HoldGaze(pose);
 
                 if (direct && (_centerPending || _center == null))
                 {
@@ -310,7 +409,18 @@ namespace EDSC.Desktop.Services
 
                     if (elapsed >= CentreSettleSeconds)
                     {
-                        _centreSamples.Add(pose);
+                        _centreSamples.Add(new HeadPose
+                        {
+                            X = pose.X,
+                            Y = pose.Y,
+                            Z = pose.Z,
+                            Yaw = pose.Yaw,
+                            Pitch = pose.Pitch,
+                            Roll = pose.Roll,
+                            HasGaze = _haveGaze,
+                            GazeYaw = _heldGazeYaw,
+                            GazePitch = _heldGazePitch
+                        });
                     }
 
                     if (elapsed >= CentreSettleSeconds + CentreAverageSeconds && _centreSamples.Count > 0)
@@ -322,7 +432,10 @@ namespace EDSC.Desktop.Services
                             Z = _centreSamples.Average(p => p.Z),
                             Yaw = _centreSamples.Average(p => p.Yaw),
                             Pitch = _centreSamples.Average(p => p.Pitch),
-                            Roll = _centreSamples.Average(p => p.Roll)
+                            Roll = _centreSamples.Average(p => p.Roll),
+                            HasGaze = _haveGaze,
+                            GazeYaw = _centreSamples.Average(p => p.GazeYaw),
+                            GazePitch = _centreSamples.Average(p => p.GazePitch)
                         };
                         Debug.WriteLine($"[PoseOutputRouter] Centre captured from {_centreSamples.Count} samples: {_center}");
                         _centerPending = false;
@@ -344,13 +457,43 @@ namespace EDSC.Desktop.Services
                     PushSample(pose, now, sourceTimestampMs);
                     return;
                 }
+
+                // Opentrack does its own centring, so the gaze is used uncentred: it is already
+                // relative to the head and rests near zero when looking straight ahead
+                var nudgeYaw = Nudge(_heldGazeYaw);
+                var nudgePitch = Nudge(_heldGazePitch);
+                opentrackPose = new HeadPose
+                {
+                    X = pose.X,
+                    Y = pose.Y,
+                    Z = pose.Z,
+                    Yaw = pose.Yaw + nudgeYaw,
+                    Pitch = pose.Pitch + nudgePitch,
+                    Roll = pose.Roll,
+                    FaceBox = pose.FaceBox,
+                    Landmarks = pose.Landmarks,
+                    HasGaze = _haveGaze,
+                    GazeYaw = _heldGazeYaw,
+                    GazePitch = _heldGazePitch
+                };
+                _lastOutput = new OutputSnapshot
+                {
+                    Valid = true,
+                    Yaw = pose.Yaw,
+                    Pitch = pose.Pitch,
+                    HasGaze = _haveGaze,
+                    GazeYaw = _heldGazeYaw,
+                    GazePitch = _heldGazePitch,
+                    NudgeYaw = nudgeYaw,
+                    NudgePitch = nudgePitch
+                };
             }
 
             // Opentrack centres, filters and maps for itself at its own tick rate, so it gets the
             // scaled absolute pose as soon as it arrives.
             if (_udpSender != null && _udpSender.IsConnected)
             {
-                await _udpSender.SendPoseAsync(ApplyScales(pose));
+                await _udpSender.SendPoseAsync(ApplyScales(opentrackPose));
             }
         }
 
@@ -416,7 +559,9 @@ namespace EDSC.Desktop.Services
                 Z = pose.Z,
                 Yaw = pose.Yaw,
                 Pitch = pose.Pitch,
-                Roll = pose.Roll
+                Roll = pose.Roll,
+                GazeYaw = _heldGazeYaw,
+                GazePitch = _heldGazePitch
             };
             if (_ringCount < RingSize)
             {
@@ -438,7 +583,9 @@ namespace EDSC.Desktop.Services
                 Z = a.Z + (b.Z - a.Z) * f,
                 Yaw = a.Yaw + (b.Yaw - a.Yaw) * f,
                 Pitch = a.Pitch + (b.Pitch - a.Pitch) * f,
-                Roll = a.Roll + (b.Roll - a.Roll) * f
+                Roll = a.Roll + (b.Roll - a.Roll) * f,
+                GazeYaw = a.GazeYaw + (b.GazeYaw - a.GazeYaw) * f,
+                GazePitch = a.GazePitch + (b.GazePitch - a.GazePitch) * f
             };
         }
 
@@ -596,12 +743,34 @@ namespace EDSC.Desktop.Services
                 var sample = Resample(now - delay);
 
                 var center = _center;
+
+                // The gaze nudge joins the head angle before the filter, so its jitter is smoothed
+                // by the same adaptive filter as the head and never adds a second noise source
+                var headYaw = sample.Yaw - center.Yaw;
+                var headPitch = sample.Pitch - center.Pitch;
+                var gazeYaw = sample.GazeYaw - center.GazeYaw;
+                var gazePitch = sample.GazePitch - center.GazePitch;
+                var nudgeYaw = Nudge(gazeYaw);
+                var nudgePitch = Nudge(gazePitch);
+
                 x = _filters[0].Filter(sample.X - center.X, now);
                 y = _filters[1].Filter(sample.Y - center.Y, now);
                 z = _filters[2].Filter(sample.Z - center.Z, now);
-                yaw = _filters[3].Filter(sample.Yaw - center.Yaw, now);
-                pitch = _filters[4].Filter(sample.Pitch - center.Pitch, now);
+                yaw = _filters[3].Filter(headYaw + nudgeYaw, now);
+                pitch = _filters[4].Filter(headPitch + nudgePitch, now);
                 roll = _filters[5].Filter(sample.Roll - center.Roll, now);
+
+                _lastOutput = new OutputSnapshot
+                {
+                    Valid = true,
+                    Yaw = headYaw,
+                    Pitch = headPitch,
+                    HasGaze = _haveGaze,
+                    GazeYaw = gazeYaw,
+                    GazePitch = gazePitch,
+                    NudgeYaw = nudgeYaw,
+                    NudgePitch = nudgePitch
+                };
 
                 translationScale = TranslationScale;
                 yawScale = YawScale;

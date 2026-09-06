@@ -155,7 +155,7 @@
                               FontSize="13"
                               Foreground="#F9FAFB"/>
                     <Grid ColumnDefinitions="Auto,*,Auto"
-                          RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Position"
                                   FontSize="11" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,8,6"/>
                         <Slider Grid.Row="0" Grid.Column="1" Minimum="0.1" Maximum="25" SmallChange="0.5" LargeChange="2"
@@ -190,6 +190,14 @@
                                 Value="{Binding SmoothingStrength}" Margin="0,0,8,0"/>
                         <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SmoothingStrength, StringFormat='{}{0:0%}'}"
                                   FontSize="11" Foreground="#10B981" VerticalAlignment="Center" MinWidth="44"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Eye nudge"
+                                  ToolTip.Tip="Adds a fraction of where your eyes look to the head direction. Phone-side tracking only. 0% turns it off."
+                                  FontSize="11" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,6,8,0"/>
+                        <Slider Grid.Row="5" Grid.Column="1" Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                Value="{Binding GazeNudge}" Margin="0,6,8,0"/>
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding GazeNudge, StringFormat='{}{0:0%}'}"
+                                  FontSize="11" Foreground="#10B981" VerticalAlignment="Center" Margin="0,6,0,0" MinWidth="44"/>
                     </Grid>
 
                     <CheckBox Content="Show face mesh preview"
@@ -298,6 +306,7 @@
                              HorizontalAlignment="Center"
                              VerticalAlignment="Top">
                         <controls:FaceMeshView Frame="{Binding MeshFrame}"
+                                               Indicator="{Binding GazeIndicator}"
                                                IsVisible="{Binding HasMeshFrame}"
                                                Width="480"/>
                     </Viewbox>

@@ -31,6 +31,8 @@ namespace EDSC.ViewModels
         private double _rotationScale;
         private double _rollScale;
         private double _smoothingStrength;
+        private double _gazeNudge;
+        private GazeIndicator? _gazeIndicator;
 
         // Whether the desktop preview panel draws the face mesh
         private bool _showPcPreview = true;
@@ -376,6 +378,48 @@ namespace EDSC.ViewModels
         }
 
         /// <summary>
+        /// Fraction of the eye gaze angle added to the head angles, 0 to 1. Phone-side tracking only.
+        /// </summary>
+        public double GazeNudge
+        {
+            get
+            {
+                return _gazeNudge;
+            }
+            set
+            {
+                if (Math.Abs(_gazeNudge - value) < 0.0001)
+                {
+                    return;
+                }
+
+                _gazeNudge = value;
+                OnPropertyChanged(nameof(GazeNudge));
+            }
+        }
+
+        /// <summary>
+        /// Head and eye directions for the preview panel inset, or null to hide it.
+        /// </summary>
+        public GazeIndicator? GazeIndicator
+        {
+            get
+            {
+                return _gazeIndicator;
+            }
+            set
+            {
+                if (ReferenceEquals(_gazeIndicator, value))
+                {
+                    return;
+                }
+
+                _gazeIndicator = value;
+                OnPropertyChanged(nameof(GazeIndicator));
+            }
+        }
+
+        /// <summary>
         /// True to draw the face mesh in the desktop preview panel. Off saves a little CPU on the PC
         /// and tells the phone to stop sending mesh frames. The camera image never reaches the panel.
         /// </summary>
@@ -655,6 +699,7 @@ namespace EDSC.ViewModels
             _rotationScale = 1.0;
             _rollScale = 1.0;
             _smoothingStrength = 0.5;
+            _gazeNudge = 0.2;
 
             // Initialize pose output properties
             _directOutputEnabled = false;
@@ -758,6 +803,7 @@ namespace EDSC.ViewModels
             ShowVideoPreview = false;
             MeshFrame = null;
             HasMeshFrame = false;
+            GazeIndicator = null;
             VideoFps = "0.0";
             VideoStatusText = "Waiting for video stream...";
         }

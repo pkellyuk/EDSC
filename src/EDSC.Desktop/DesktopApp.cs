@@ -369,6 +369,7 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
                 || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
                 || propertyName == nameof(ConnectionViewModel.ShowPcPreview)
+                || propertyName == nameof(ConnectionViewModel.GazeNudge)
                 || propertyName == nameof(ConnectionViewModel.CenterHotkey);
         }
 
@@ -442,6 +443,7 @@ namespace EDSC.Desktop
             viewModel.RotationScale = ClampTrackingScale(config.PitchScale);
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
+            viewModel.GazeNudge = ClampGazeNudge(config.GazeNudge);
             viewModel.DirectOutputEnabled = config.DirectOutput;
             viewModel.ShowPcPreview = config.EffectiveShowPreview;
             viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
@@ -481,6 +483,7 @@ namespace EDSC.Desktop
             poseRouter.PitchScale = viewModel.RotationScale;
             poseRouter.RollScale = viewModel.RollScale;
             poseRouter.SmoothingStrength = viewModel.SmoothingStrength;
+            poseRouter.GazeNudge = viewModel.GazeNudge;
             poseRouter.DirectOutputEnabled = viewModel.DirectOutputEnabled;
         }
 
@@ -496,6 +499,7 @@ namespace EDSC.Desktop
             config.Tracking.PitchScale = viewModel.RotationScale;
             config.Tracking.RollScale = viewModel.RollScale;
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
+            config.Tracking.GazeNudge = viewModel.GazeNudge;
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
             config.Tracking.ShowPreview = viewModel.ShowPcPreview;
             config.Tracking.PreviewMode = viewModel.ShowPcPreview ? PreviewMode.LandmarksOnly : PreviewMode.Off;
@@ -520,6 +524,45 @@ namespace EDSC.Desktop
             }
 
             return Math.Clamp(value, TrackingScaleMin, TrackingScaleMax);
+        }
+
+        private static double ClampGazeNudge(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+            {
+                return 0.0;
+            }
+
+            return Math.Clamp(value, 0.0, 1.0);
+        }
+
+        /// <summary>
+        /// Snapshot of the router's latest directions for the preview inset, or null before any output.
+        /// </summary>
+        private GazeIndicator? BuildGazeIndicator()
+        {
+            var router = _poseRouter;
+            if (router == null)
+            {
+                return null;
+            }
+
+            var output = router.LastOutput;
+            if (!output.Valid)
+            {
+                return null;
+            }
+
+            return new GazeIndicator
+            {
+                HeadYaw = output.Yaw,
+                HeadPitch = output.Pitch,
+                HasGaze = output.HasGaze,
+                GazeYaw = output.GazeYaw,
+                GazePitch = output.GazePitch,
+                NudgeYaw = output.NudgeYaw,
+                NudgePitch = output.NudgePitch
+            };
         }
 
         private static double ClampTrackingSmoothing(double value)
@@ -1160,6 +1203,7 @@ namespace EDSC.Desktop
                         }
 
                         vm.UpdateMesh(latest, 0, null, preserveStatus: true);
+                        vm.GazeIndicator = BuildGazeIndicator();
                     }
                     catch (Exception ex)
                     {
@@ -1200,6 +1244,7 @@ namespace EDSC.Desktop
                         {
                             // Face lost: the phone stops sending meshes, so clear the stale one
                             viewModel.UpdateMesh(null, 0, null, preserveStatus: true);
+                            viewModel.GazeIndicator = null;
                         }
 
                         if (_poseRouter != null)
@@ -1252,6 +1297,7 @@ namespace EDSC.Desktop
                             }
 
                             viewModel.UpdateMesh(mesh, fps, _faceTrackingService?.LastStatus);
+                            viewModel.GazeIndicator = BuildGazeIndicator();
 
                             if (_poseRouter != null)
                             {

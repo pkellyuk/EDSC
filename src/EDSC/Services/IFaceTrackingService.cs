@@ -42,6 +42,15 @@ namespace EDSC.Services
         public FaceBox? FaceBox { get; set; }
         public LandmarkPoint[]? Landmarks { get; set; }
 
+        /// <summary>True when the tracker measured eye gaze for this pose (phone-side tracking with the iris landmarks).</summary>
+        public bool HasGaze { get; set; }
+
+        /// <summary>Eye gaze relative to the head in degrees, positive when looking to your own left. Valid when <see cref="HasGaze"/>.</summary>
+        public double GazeYaw { get; set; }
+
+        /// <summary>Eye gaze relative to the head in degrees, positive when looking up. Valid when <see cref="HasGaze"/>.</summary>
+        public double GazePitch { get; set; }
+
         public override string ToString()
         {
             return $"X={X:F2}, Y={Y:F2}, Z={Z:F2}, Yaw={Yaw:F2}, Pitch={Pitch:F2}, Roll={Roll:F2}";
