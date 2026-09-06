@@ -1977,7 +1977,8 @@ namespace EDSC.Desktop.Services
       stepMs: 0,
       camInfo: '',
       lastReadoutAt: 0,
-      overlayClear: true
+      overlayClear: true,
+      pendingGaze: null
     };
 
     // Phone-side performance choices, remembered per device. The camera size feeds MediaPipe's
@@ -2139,22 +2140,58 @@ namespace EDSC.Desktop.Services
     // against the eyelid midpoint, both as a fraction of the eye width so distance from the camera
     // drops out. The fraction becomes an angle through the eyeball (about 12 mm radius against a
     // 30 mm eye opening). Positive yaw = looking to your own left, positive pitch = up, matching
-    // the head pose. A shut eye (lid gap under 12% of the width, a blink) is left out; with both
-    // shut no gaze is reported and the PC holds the last value.
+    // the head pose.
+    //
+    // Blinks. Both measurements are taken against the eye corners, which do not move when the
+    // lids do, so a closing lid cannot drag the reference around. The lid gap is compared with a
+    // slowly learned open-eye baseline per eye: once it drops below 70% of that, the iris estimate
+    // is already being pulled by the lid, so the eye is left out, and it stays out for a short
+    // settle time after it reopens. With both eyes out no gaze is reported and the PC holds the
+    // last value, so a blink neither flicks the view nor drops it to zero.
     const EYE_DEFS = [
       { cornerA: 33, cornerB: 133, lidTop: 159, lidBottom: 145 },
       { cornerA: 362, cornerB: 263, lidTop: 386, lidBottom: 374 }
     ];
     const IRIS_CENTRES = [468, 473];
     const EYE_ANGLE_GAIN = 2.4;
-    const EYE_CLOSED_RATIO = 0.12;
-    const GAZE_RAY_PX_PER_DEG = 1.6;   // drawn ray length per degree, at 480 px frame width
+    const EYE_CLOSED_RATIO = 0.12;          // lid gap / width: definitely shut, before a baseline exists
+    const EYE_BLINK_FRACTION = 0.75;        // of the learned open baseline; below this the eye is blinking
+    const EYE_BASELINE_RATE = 0.02;         // per frame; the baseline follows slow changes only
+    const EYE_SETTLE_MS = 150;              // ignore an eye for this long after a blink ends
+    const GAZE_RAY_PX_PER_DEG = 1.6;        // drawn ray length per degree, at 480 px frame width
+    const eyeState = [
+      { baseline: 0, blockedUntil: 0 },
+      { baseline: 0, blockedUntil: 0 }
+    ];
+
+    function resetEyeState() {
+      for (let i = 0; i < eyeState.length; i++) {
+        eyeState[i].baseline = 0;
+        eyeState[i].blockedUntil = 0;
+      }
+      phoneTracker.pendingGaze = null;
+    }
+
+    // Gaze is reported one frame late: a frame only counts once the frame after it is also clean.
+    // The last frame before a blink is detected already has the lid pulling on the iris a little,
+    // and it would otherwise be the value the PC holds for the whole blink. 33 ms on the nudge
+    // alone is not noticeable; the head pose is not delayed.
+    function delayedGaze(current) {
+      if (!current) {
+        phoneTracker.pendingGaze = null;
+        return null;
+      }
+      const ready = phoneTracker.pendingGaze;
+      phoneTracker.pendingGaze = current;
+      return ready;
+    }
 
     function computeGaze(landmarks, w, h) {
       if (!landmarks || landmarks.length < 478 || !w || !h) {
         return null;
       }
       const clampUnit = (v) => Math.max(-1, Math.min(1, v));
+      const now = performance.now();
       let yawSum = 0;
       let pitchSum = 0;
       let count = 0;
@@ -2205,13 +2242,21 @@ namespace EDSC.Desktop.Services
 
         const topX = top.x * w, topY = top.y * h, botX = bottom.x * w, botY = bottom.y * h;
         const openness = ((botX - topX) * vx + (botY - topY) * vy) / width;
-        if (openness < EYE_CLOSED_RATIO) {
+        const state = eyeState[e];
+        const blinking = openness < EYE_CLOSED_RATIO || (state.baseline > 0 && openness < state.baseline * EYE_BLINK_FRACTION);
+        if (blinking) {
+          state.blockedUntil = now + EYE_SETTLE_MS;
           continue;
         }
+        if (now < state.blockedUntil) {
+          continue;
+        }
+        // Learn how open this eye normally is; a first reading seeds it, then it drifts slowly
+        state.baseline = state.baseline > 0 ? state.baseline + (openness - state.baseline) * EYE_BASELINE_RATE : openness;
 
-        const lidMidX = (topX + botX) / 2, lidMidY = (topY + botY) / 2;
+        // Both axes against the corner midpoint: the corners hold still through a blink
         const hFrac = ((iris.x - cornerMidX) * ux + (iris.y - cornerMidY) * uy) / width;
-        const vFrac = ((iris.x - lidMidX) * vx + (iris.y - lidMidY) * vy) / width;
+        const vFrac = ((iris.x - cornerMidX) * vx + (iris.y - cornerMidY) * vy) / width;
         yawSum += Math.asin(clampUnit(hFrac * EYE_ANGLE_GAIN)) * RAD2DEG;
         pitchSum -= Math.asin(clampUnit(vFrac * EYE_ANGLE_GAIN)) * RAD2DEG;
         count++;
@@ -2532,7 +2577,7 @@ namespace EDSC.Desktop.Services
 
       if (faces.length > 0 && matrices.length > 0) {
         const pose = poseFromMatrix(matrices[0].data);
-        const gaze = computeGaze(faces[0], w, h);
+        const gaze = delayedGaze(computeGaze(faces[0], w, h));
         // ts is the phone's own clock at capture; the PC uses it to place the sample on a
         // jitter-free timeline before resampling to the game's rate. gy/gp are eye gaze relative
         // to the head, left out while the eyes are shut so the PC holds the last value.
@@ -2650,6 +2695,7 @@ namespace EDSC.Desktop.Services
             phoneTracker.lastVideoTime = -1;
             phoneTracker.lostSent = false;
             phoneTracker.inferMs = 0;
+            resetEyeState();
             schedulePhoneFrame();
           } else {
             setTrackingStatus('Streaming');

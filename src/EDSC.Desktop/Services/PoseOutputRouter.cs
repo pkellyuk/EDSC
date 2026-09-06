@@ -75,6 +75,14 @@ namespace EDSC.Desktop.Services
         // is held rather than dropping to zero and back; that would read as a downward flick.
         private const double GazeDeadZoneDegrees = 2.0;
         private double _gazeNudge = 0.2;
+
+        // The nudge is meant to lead the view gently, never to react like the head does, so the
+        // gaze gets its own plain low-pass (beta 0 = no speed adaptation) before it is added. A
+        // real glance settles in about a quarter of a second; the residue of a blink, a frame or
+        // two of pulled iris either side of the hold, is mostly averaged away.
+        private const double GazeCutoffHz = 1.5;
+        private readonly OneEuroFilter _gazeYawFilter = new OneEuroFilter(GazeCutoffHz, 0.0);
+        private readonly OneEuroFilter _gazePitchFilter = new OneEuroFilter(GazeCutoffHz, 0.0);
         private bool _haveGaze;
         private double _heldGazeYaw;
         private double _heldGazePitch;
@@ -248,6 +256,9 @@ namespace EDSC.Desktop.Services
             {
                 filter.Reset();
             }
+
+            _gazeYawFilter.Reset();
+            _gazePitchFilter.Reset();
         }
 
         private void ResetResampler()
@@ -460,8 +471,10 @@ namespace EDSC.Desktop.Services
 
                 // Opentrack does its own centring, so the gaze is used uncentred: it is already
                 // relative to the head and rests near zero when looking straight ahead
-                var nudgeYaw = Nudge(_heldGazeYaw);
-                var nudgePitch = Nudge(_heldGazePitch);
+                var smoothGazeYaw = _gazeYawFilter.Filter(_heldGazeYaw, now);
+                var smoothGazePitch = _gazePitchFilter.Filter(_heldGazePitch, now);
+                var nudgeYaw = Nudge(smoothGazeYaw);
+                var nudgePitch = Nudge(smoothGazePitch);
                 opentrackPose = new HeadPose
                 {
                     X = pose.X,
@@ -748,8 +761,8 @@ namespace EDSC.Desktop.Services
                 // by the same adaptive filter as the head and never adds a second noise source
                 var headYaw = sample.Yaw - center.Yaw;
                 var headPitch = sample.Pitch - center.Pitch;
-                var gazeYaw = sample.GazeYaw - center.GazeYaw;
-                var gazePitch = sample.GazePitch - center.GazePitch;
+                var gazeYaw = _gazeYawFilter.Filter(sample.GazeYaw - center.GazeYaw, now);
+                var gazePitch = _gazePitchFilter.Filter(sample.GazePitch - center.GazePitch, now);
                 var nudgeYaw = Nudge(gazeYaw);
                 var nudgePitch = Nudge(gazePitch);
 
