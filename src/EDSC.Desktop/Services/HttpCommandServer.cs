@@ -54,12 +54,6 @@ namespace EDSC.Desktop.Services
         /// </summary>
         public bool PreviewEnabled { get; set; } = true;
 
-        /// <summary>
-        /// How the phone should compose the preview it sends: "camera" (video only),
-        /// "cameraWithLandmarks" (video plus mesh) or "landmarksOnly" (mesh on black).
-        /// Reported to the phone via the version poll alongside <see cref="PreviewEnabled"/>.
-        /// </summary>
-        public string PreviewMode { get; set; } = "cameraWithLandmarks";
 
         /// <summary>
         /// Event fired when a new video frame is received
@@ -82,9 +76,9 @@ namespace EDSC.Desktop.Services
         public event EventHandler<HeadPose?>? PhonePoseReceived;
 
         /// <summary>
-        /// Event fired when the phone sends a low-rate preview image (with its overlay baked in) alongside poses
+        /// Event fired when the phone sends a face mesh frame (line segments only, no camera pixels) alongside poses
         /// </summary>
-        public event EventHandler<byte[]>? PreviewFrameReceived;
+        public event EventHandler<FaceMeshFrame>? PhoneMeshReceived;
 
         // Phone pose rate
         private int _phonePoseCount;
@@ -438,8 +432,7 @@ namespace EDSC.Desktop.Services
                 updatedUtc = config.LastUpdatedUtc,
                 game = GameIds.Normalize(config.ActiveGame),
                 page = PageStamp,
-                preview = PreviewEnabled,
-                previewMode = PreviewMode
+                preview = PreviewEnabled
             }));
         }
 
@@ -1744,9 +1737,6 @@ namespace EDSC.Desktop.Services
         if (typeof v.preview === 'boolean') {
           previewWanted = v.preview;
         }
-        if (typeof v.previewMode === 'string') {
-          previewMode = v.previewMode;
-        }
 
         const stamp = String(v.version) + ':' + String(v.updatedUtc) + ':' + String(v.game || '');
         if (configStamp !== null && stamp !== configStamp) {
@@ -2064,8 +2054,12 @@ namespace EDSC.Desktop.Services
       tracking.canvas = document.getElementById('videoCanvas');
       tracking.ctx = tracking.canvas.getContext('2d', { willReadFrequently: true });
       tracking.overlay = document.getElementById('overlayCanvas');
-      // desynchronized lets the browser skip a compositor copy for the overlay on Android
-      tracking.overlayCtx = tracking.overlay.getContext('2d', { desynchronized: true });
+      // Plain 2D context on purpose. The 'desynchronized' (low-latency) hint routes the canvas
+      // round the page compositor, and on Android Chrome that path intermittently stops
+      // presenting new frames when the canvas sits over a <video> element: the mesh freezes
+      // while inference and pose sending carry on. The compositor copy it saves is a single
+      // 480x360 RGBA blit per frame, far below the inference cost, so nothing measurable is lost.
+      tracking.overlayCtx = tracking.overlay.getContext('2d');
 
       initTrackingOptions();
 
@@ -2170,16 +2164,42 @@ namespace EDSC.Desktop.Services
       ctx.stroke();
     }
 
+    // The line groups that make up the mesh, shared by the on-screen overlay and the frames sent
+    // to the desktop panel so both show the same thing. style is the FaceMeshStyle value the PC
+    // uses to pick a colour. Built once the MediaPipe module is loaded.
+    let meshGroupTable = null;
+
+    function getMeshGroups() {
+      if (meshGroupTable) {
+        return meshGroupTable;
+      }
+      const vision = phoneTracker.vision;
+      if (!vision) {
+        return null;
+      }
+      const FL = vision.FaceLandmarker;
+      meshGroupTable = {
+        // ~2500 segments; the single biggest drawing cost, so it is opt-in
+        tessellation: { conn: FL.FACE_LANDMARKS_TESSELATION, color: 'rgba(76, 175, 80, 0.35)', width: 0.6, style: 3 },
+        outline: [
+          { conn: FL.FACE_LANDMARKS_FACE_OVAL, color: '#4caf50', width: 1.5, style: 0 },
+          { conn: FL.FACE_LANDMARKS_LEFT_EYE, color: '#60a5fa', width: 1.2, style: 1 },
+          { conn: FL.FACE_LANDMARKS_RIGHT_EYE, color: '#60a5fa', width: 1.2, style: 1 },
+          { conn: FL.FACE_LANDMARKS_LIPS, color: '#f87171', width: 1.2, style: 2 }
+        ]
+      };
+      return meshGroupTable;
+    }
+
     function drawFaceMesh(landmarks) {
       const ctx = tracking.overlayCtx;
-      const vision = phoneTracker.vision;
-      if (!ctx || !vision) {
+      const groups = getMeshGroups();
+      if (!ctx || !groups) {
         return;
       }
 
       const w = tracking.overlay.width;
       const h = tracking.overlay.height;
-      const FL = vision.FaceLandmarker;
 
       if (trackingPrefs.mesh === 'off') {
         if (!phoneTracker.overlayClear) {
@@ -2192,13 +2212,13 @@ namespace EDSC.Desktop.Services
       ctx.clearRect(0, 0, w, h);
       phoneTracker.overlayClear = false;
       if (trackingPrefs.mesh === 'full') {
-        // ~2500 segments; the single biggest drawing cost, so it is opt-in
-        strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_TESSELATION, 'rgba(76, 175, 80, 0.35)', 0.6, w, h);
+        const t = groups.tessellation;
+        strokeConnections(ctx, landmarks, t.conn, t.color, t.width, w, h);
       }
-      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_FACE_OVAL, '#4caf50', 1.5, w, h);
-      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_LEFT_EYE, '#60a5fa', 1.2, w, h);
-      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_RIGHT_EYE, '#60a5fa', 1.2, w, h);
-      strokeConnections(ctx, landmarks, FL.FACE_LANDMARKS_LIPS, '#f87171', 1.2, w, h);
+      for (let i = 0; i < groups.outline.length; i++) {
+        const g = groups.outline[i];
+        strokeConnections(ctx, landmarks, g.conn, g.color, g.width, w, h);
+      }
     }
 
     function sendPhoneMessage(obj) {
@@ -2207,58 +2227,70 @@ namespace EDSC.Desktop.Services
       }
     }
 
-    // Low-rate preview for the desktop panel: video plus the mesh overlay, small and cheap.
-    const PREVIEW_INTERVAL_MS = 150;
-    const PREVIEW_WIDTH = 320;
-    const previewCanvas = document.createElement('canvas');
-    let previewLastSent = 0;
-    let previewBusy = false;
+    // Face mesh for the desktop panel: the same line segments the overlay draws, packed as 16-bit
+    // normalised coordinates. The outline is about 1 KB a frame so it goes at camera rate; the full
+    // tessellation is ~20 KB so it is halved. The camera image itself never leaves the phone.
+    const MESH_SEND_INTERVAL_MS = 33;
+    const MESH_SEND_INTERVAL_FULL_MS = 66;
+    let meshLastSent = 0;
     let previewWanted = true;   // the PC can switch this off via the version poll
-    let previewMode = 'cameraWithLandmarks';   // camera | cameraWithLandmarks | landmarksOnly, from the version poll
 
-    function sendPhonePreview(video, w, h) {
-      if (!previewWanted) {
-        return;
-      }
-      const now = Date.now();
-      if (previewBusy || now - previewLastSent < PREVIEW_INTERVAL_MS) {
+    function toU16(v) {
+      return Math.max(0, Math.min(65535, Math.round(v * 65535)));
+    }
+
+    function sendPhoneMesh(landmarks, w, h) {
+      if (!previewWanted || !landmarks) {
         return;
       }
       if (!tracking.ws || tracking.ws.readyState !== WebSocket.OPEN) {
         return;
       }
-      previewLastSent = now;
-
-      const pw = PREVIEW_WIDTH;
-      const ph = Math.max(1, Math.round(PREVIEW_WIDTH * h / w));
-      if (previewCanvas.width !== pw || previewCanvas.height !== ph) {
-        previewCanvas.width = pw;
-        previewCanvas.height = ph;
+      const groups = getMeshGroups();
+      if (!groups) {
+        return;
       }
 
-      const ctx = previewCanvas.getContext('2d');
-      if (previewMode === 'landmarksOnly') {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, pw, ph);
-      } else {
-        ctx.drawImage(video, 0, 0, pw, ph);
+      const full = trackingPrefs.mesh === 'full';
+      const now = Date.now();
+      if (now - meshLastSent < (full ? MESH_SEND_INTERVAL_FULL_MS : MESH_SEND_INTERVAL_MS)) {
+        return;
       }
-      if (previewMode !== 'camera') {
-        ctx.drawImage(tracking.overlay, 0, 0, pw, ph);
+      meshLastSent = now;
+
+      // Mesh 'off' on the phone still sends the outline: the PC panel is the check that tracking works
+      const list = full ? [groups.tessellation].concat(groups.outline) : groups.outline;
+      let bytes = 7;
+      for (let i = 0; i < list.length; i++) {
+        bytes += 4 + list[i].conn.length * 8;
       }
 
-      previewBusy = true;
-      previewCanvas.toBlob((blob) => {
-        previewBusy = false;
-        if (!blob || !tracking.ws || tracking.ws.readyState !== WebSocket.OPEN) {
-          return;
+      const buf = new ArrayBuffer(bytes);
+      const dv = new DataView(buf);
+      let o = 0;
+      dv.setUint8(o++, 0x4d);   // 'M'
+      dv.setUint8(o++, 1);      // format version
+      dv.setUint16(o, Math.min(65535, w), true); o += 2;
+      dv.setUint16(o, Math.min(65535, h), true); o += 2;
+      dv.setUint8(o++, list.length);
+
+      for (let gi = 0; gi < list.length; gi++) {
+        const g = list[gi];
+        const conn = g.conn;
+        dv.setUint8(o++, g.style);
+        dv.setUint8(o++, Math.round(g.width * 10));
+        dv.setUint16(o, conn.length, true); o += 2;
+        for (let i = 0; i < conn.length; i++) {
+          const a = landmarks[conn[i].start];
+          const b = landmarks[conn[i].end];
+          dv.setUint16(o, toU16(a ? a.x : 0), true); o += 2;
+          dv.setUint16(o, toU16(a ? a.y : 0), true); o += 2;
+          dv.setUint16(o, toU16(b ? b.x : 0), true); o += 2;
+          dv.setUint16(o, toU16(b ? b.y : 0), true); o += 2;
         }
-        blob.arrayBuffer().then((buffer) => {
-          if (tracking.ws && tracking.ws.readyState === WebSocket.OPEN) {
-            tracking.ws.send(buffer);
-          }
-        });
-      }, 'image/jpeg', 0.5);
+      }
+
+      tracking.ws.send(buf);
     }
 
     function updatePhoneFps() {
@@ -2357,7 +2389,7 @@ namespace EDSC.Desktop.Services
         phoneTracker.lostSent = false;
         updatePhoneFps();
         drawFaceMesh(faces[0]);
-        sendPhonePreview(video, w, h);
+        sendPhoneMesh(faces[0], w, h);
 
         if (readout) {
           // Nose tip position in the frame: if this stays near 50% while you move sideways,
@@ -2376,7 +2408,6 @@ namespace EDSC.Desktop.Services
           tracking.overlayCtx.clearRect(0, 0, tracking.overlay.width, tracking.overlay.height);
           phoneTracker.overlayClear = true;
         }
-        sendPhonePreview(video, w, h);
         if (!phoneTracker.lostSent) {
           sendPhoneMessage({ t: 'lost' });
           phoneTracker.lostSent = true;
@@ -2915,6 +2946,70 @@ namespace EDSC.Desktop.Services
         }
 
         /// <summary>
+        /// Decode a face mesh frame sent by the page script (see sendPhoneMesh there). Little-endian layout:
+        /// u8 magic 'M', u8 version 1, u16 width, u16 height, u8 groupCount, then per group
+        /// u8 style, u8 lineWidth*10, u16 segmentCount and segmentCount * 4 * u16 coordinates scaled 0..65535.
+        /// Returns null for anything that does not fit, so a bad frame is dropped rather than drawn.
+        /// </summary>
+        internal static FaceMeshFrame? ParseMeshFrame(byte[] data, int length)
+        {
+            if (data == null || length < 7 || length > data.Length)
+            {
+                return null;
+            }
+
+            if (data[0] != 0x4D || data[1] != 1)
+            {
+                return null;
+            }
+
+            var span = new ReadOnlySpan<byte>(data, 0, length);
+            var offset = 2;
+            int width = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(offset));
+            offset += 2;
+            int height = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(offset));
+            offset += 2;
+            int groupCount = data[offset++];
+
+            const float Scale = 1f / 65535f;
+            var groups = new FaceMeshGroup[groupCount];
+            for (int g = 0; g < groupCount; g++)
+            {
+                if (offset + 4 > length)
+                {
+                    return null;
+                }
+
+                var style = (FaceMeshStyle)data[offset++];
+                var lineWidth = data[offset++] / 10f;
+                int segmentCount = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(offset));
+                offset += 2;
+
+                var bytesNeeded = segmentCount * 8;
+                if (offset + bytesNeeded > length)
+                {
+                    return null;
+                }
+
+                var segments = new float[segmentCount * 4];
+                for (int i = 0; i < segments.Length; i++)
+                {
+                    segments[i] = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(offset)) * Scale;
+                    offset += 2;
+                }
+
+                groups[g] = new FaceMeshGroup(style, lineWidth, segments);
+            }
+
+            if (offset != length)
+            {
+                Debug.WriteLine($"[HttpCommandServer] Mesh frame has {length - offset} trailing bytes");
+            }
+
+            return new FaceMeshFrame(width, height, groups);
+        }
+
+        /// <summary>
         /// Receives poses computed on the phone by MediaPipe as small JSON text messages:
         /// {"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..} or {"t":"lost"}.
         /// Angles in degrees, translation in centimetres, same conventions as the PC tracker.
@@ -2927,7 +3022,7 @@ namespace EDSC.Desktop.Services
             }
 
             WebSocket? webSocket = null;
-            const int MaxPoseMessageBytes = 512 * 1024;   // poses are tiny; preview JPEGs are a few tens of KB
+            const int MaxPoseMessageBytes = 512 * 1024;   // poses are tiny; a full-tessellation mesh frame is ~20 KB
 
             try
             {
@@ -2979,7 +3074,7 @@ namespace EDSC.Desktop.Services
                         continue;
                     }
 
-                    // Binary on this socket is a preview image for the desktop panel
+                    // Binary on this socket is a face mesh frame for the desktop panel
                     if (result.MessageType == WebSocketMessageType.Binary)
                     {
                         if (!PreviewEnabled)
@@ -2987,12 +3082,14 @@ namespace EDSC.Desktop.Services
                             continue;
                         }
 
-                        var preview = message.ToArray();
-                        lock (_frameLock)
+                        var mesh = ParseMeshFrame(message.GetBuffer(), (int)message.Length);
+                        if (mesh == null)
                         {
-                            _latestFrame = preview;
+                            Debug.WriteLine($"[HttpCommandServer] Ignoring malformed mesh frame of {message.Length} bytes");
+                            continue;
                         }
-                        PreviewFrameReceived?.Invoke(this, preview);
+
+                        PhoneMeshReceived?.Invoke(this, mesh);
                         continue;
                     }
 

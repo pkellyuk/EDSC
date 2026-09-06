@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:EDSC.ViewModels"
+             xmlns:controls="using:EDSC.Controls"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="700"
@@ -191,17 +192,12 @@
                                   FontSize="11" Foreground="#10B981" VerticalAlignment="Center" MinWidth="44"/>
                     </Grid>
 
-                    <Grid ColumnDefinitions="Auto,*" Margin="0,6,0,0">
-                        <TextBlock Grid.Column="0" Text="Preview"
-                                  FontSize="11" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox Grid.Column="1"
-                                  ItemsSource="{Binding PreviewModeOptions}"
-                                  SelectedItem="{Binding SelectedPreviewModeOption}"
-                                  DisplayMemberBinding="{Binding Label}"
-                                  ToolTip.Tip="What the face tracking preview panel shows. Camera modes use the most CPU on the PC. Face mesh only skips decoding the camera image. Off also stops the phone sending preview images."
-                                  FontSize="11"
-                                  HorizontalAlignment="Stretch"/>
-                    </Grid>
+                    <CheckBox Content="Show face mesh preview"
+                              IsChecked="{Binding ShowPcPreview}"
+                              ToolTip.Tip="Draws the tracked face mesh in the preview panel. The camera image never leaves the phone in phone-tracking mode. Off also stops the phone sending mesh frames."
+                              FontSize="11"
+                              Foreground="#D1D5DB"
+                              Margin="0,6,0,0"/>
 
                     <Button Content="Reset tracking settings to defaults"
                             Command="{Binding ResetTrackingCommand}"
@@ -301,10 +297,9 @@
                              StretchDirection="Both"
                              HorizontalAlignment="Center"
                              VerticalAlignment="Top">
-                        <Image Source="{Binding VideoFrameImage}"
-                               IsVisible="{Binding HasVideoFrame}"
-                               Width="480"
-                               Height="414"/>
+                        <controls:FaceMeshView Frame="{Binding MeshFrame}"
+                                               IsVisible="{Binding HasMeshFrame}"
+                                               Width="480"/>
                     </Viewbox>
 
                     <StackPanel Grid.Row="2"

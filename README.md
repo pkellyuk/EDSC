@@ -108,7 +108,7 @@ In direct mode the first pose sets the centre. Press **Center view** or the **=*
 
 The sliders scale movement after centring. Rotation at 1x is real degrees. Position at 1x is real centimetres, which is a small fraction of the TrackIR axis range, so try around 3x and adjust. **Smoothing** drives both the tracker's smoothing and, in direct mode, an adaptive filter that removes jitter at rest without adding lag in motion.
 
-**Show camera preview on PC** can be turned off to save CPU; the phone then stops sending preview images too.
+**Show face mesh preview** draws the tracked face outline in the desktop panel. Only the mesh lines are sent from the phone (about 1 KB a frame); the camera image never leaves it. Turn the preview off to save a little CPU on both sides.
 
 Settings persist in `config.json` under `tracking`:
 
@@ -122,7 +122,7 @@ Settings persist in `config.json` under `tracking`:
     "smoothingStrength": 0.5,
     "directOutput": true,
     "showPreview": true,
-    "previewMode": "CameraWithLandmarks"
+    "previewMode": "LandmarksOnly"
   }
 }
 ```
@@ -166,7 +166,7 @@ SVG icons are served from `src/EDSC.Desktop/Assets/Icons`. The `server.port` set
 | GET | `/config/version` | Layout version and app stamp, polled by the phone |
 | POST | `/command` | `{ "buttonId": "hardpoints", "key": "U" }` presses a key |
 | WS | `/video` | JPEG frames from the phone for PC-side tracking |
-| WS | `/pose` | Poses (JSON) and preview images (binary) from phone-side tracking |
+| WS | `/pose` | Poses (JSON) and face mesh frames (binary line segments) from phone-side tracking |
 
 Pose messages are `{"t":"pose","yaw":..,"pitch":..,"roll":..,"x":..,"y":..,"z":..}` in degrees and centimetres, or `{"t":"lost"}`.
 

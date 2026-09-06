@@ -29,7 +29,7 @@ namespace EDSC.Models
         public bool DirectOutput { get; set; } = false;
 
         /// <summary>
-        /// Show the camera preview in the desktop app. Off saves CPU on the PC and, in phone-tracking mode, on the phone.
+        /// Draw the face mesh preview in the desktop app. Off saves CPU on the PC and, in phone-tracking mode, on the phone.
         /// Kept for older config files; <see cref="PreviewMode"/> takes precedence when present.
         /// </summary>
         [JsonPropertyName("showPreview")]
@@ -37,25 +37,27 @@ namespace EDSC.Models
 
         /// <summary>
         /// What the desktop preview panel shows. Null in older config files, in which case <see cref="ShowPreview"/> decides.
+        /// Only Off and LandmarksOnly are written now; the legacy camera modes are read as LandmarksOnly.
         /// </summary>
         [JsonPropertyName("previewMode")]
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public PreviewMode? PreviewMode { get; set; }
 
         /// <summary>
-        /// The preview mode to use, resolving the legacy <see cref="ShowPreview"/> flag when <see cref="PreviewMode"/> is absent.
+        /// Whether the preview panel is on, resolving the legacy <see cref="ShowPreview"/> flag when
+        /// <see cref="PreviewMode"/> is absent. Every mode other than Off means "show the mesh".
         /// </summary>
         [JsonIgnore]
-        public PreviewMode EffectivePreviewMode
+        public bool EffectiveShowPreview
         {
             get
             {
                 if (PreviewMode.HasValue)
                 {
-                    return PreviewMode.Value;
+                    return PreviewMode.Value != Models.PreviewMode.Off;
                 }
 
-                return ShowPreview ? Models.PreviewMode.CameraWithLandmarks : Models.PreviewMode.Off;
+                return ShowPreview;
             }
         }
 

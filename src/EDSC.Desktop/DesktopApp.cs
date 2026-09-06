@@ -16,11 +16,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using WindowsInput.Native;
 using Avalonia.Media.Imaging;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Drawing.Processing;
-using SixLabors.ImageSharp.Drawing;
+using System.Collections.Generic;
 using Path = System.IO.Path;
 
 namespace EDSC.Desktop
@@ -41,6 +37,8 @@ namespace EDSC.Desktop
         private ConnectionViewModel? _connectionViewModel;
         private DateTime _lastPhoneStatusUpdate = DateTime.MinValue;
         private HeadPose? _lastPose;
+        private FaceMeshFrame? _pendingMesh;
+        private int _meshUpdateQueued;
 
         public override async void OnFrameworkInitializationCompleted()
         {
@@ -370,7 +368,7 @@ namespace EDSC.Desktop
                 || propertyName == nameof(ConnectionViewModel.RollScale)
                 || propertyName == nameof(ConnectionViewModel.SmoothingStrength)
                 || propertyName == nameof(ConnectionViewModel.DirectOutputEnabled)
-                || propertyName == nameof(ConnectionViewModel.PreviewMode)
+                || propertyName == nameof(ConnectionViewModel.ShowPcPreview)
                 || propertyName == nameof(ConnectionViewModel.CenterHotkey);
         }
 
@@ -445,7 +443,7 @@ namespace EDSC.Desktop
             viewModel.RollScale = ClampTrackingScale(config.RollScale);
             viewModel.SmoothingStrength = ClampTrackingSmoothing(config.SmoothingStrength);
             viewModel.DirectOutputEnabled = config.DirectOutput;
-            viewModel.PreviewMode = config.EffectivePreviewMode;
+            viewModel.ShowPcPreview = config.EffectiveShowPreview;
             viewModel.CenterHotkey = string.IsNullOrWhiteSpace(config.CenterHotkey) ? "OEM_PLUS" : config.CenterHotkey;
         }
 
@@ -457,8 +455,7 @@ namespace EDSC.Desktop
             if (_commandServer is HttpCommandServer httpServer)
             {
                 httpServer.PreviewEnabled = viewModel.ShowPcPreview;
-                httpServer.PreviewMode = ToPhonePreviewMode(viewModel.PreviewMode);
-                Debug.WriteLine($"[DesktopApp] Preview mode applied to server: {viewModel.PreviewMode}");
+                Debug.WriteLine($"[DesktopApp] Preview enabled applied to server: {viewModel.ShowPcPreview}");
             }
 
             var hotkey = ParseHotkey(viewModel.CenterHotkey);
@@ -468,9 +465,9 @@ namespace EDSC.Desktop
             }
             viewModel.CenterHotkeyDisplay = GlobalHotkeyService.DescribeKey(hotkey);
 
-            if (!viewModel.ShowPcPreview && viewModel.HasVideoFrame)
+            if (!viewModel.ShowPcPreview && viewModel.HasMeshFrame)
             {
-                viewModel.UpdateVideoFrame(null, 0, null, preserveStatus: true);
+                viewModel.UpdateMesh(null, 0, null, preserveStatus: true);
             }
 
             // The tracker emits unscaled poses; all gain is applied in the router after centring
@@ -501,7 +498,7 @@ namespace EDSC.Desktop
             config.Tracking.SmoothingStrength = viewModel.SmoothingStrength;
             config.Tracking.DirectOutput = viewModel.DirectOutputEnabled;
             config.Tracking.ShowPreview = viewModel.ShowPcPreview;
-            config.Tracking.PreviewMode = viewModel.PreviewMode;
+            config.Tracking.PreviewMode = viewModel.ShowPcPreview ? PreviewMode.LandmarksOnly : PreviewMode.Off;
             config.Tracking.CenterHotkey = viewModel.CenterHotkey;
         }
 
@@ -695,200 +692,123 @@ namespace EDSC.Desktop
             }
         }
 
-        /// <summary>
-        /// The preview mode name the phone script understands (see the version poll in HttpCommandServer).
-        /// </summary>
-        private static string ToPhonePreviewMode(PreviewMode mode)
-        {
-            switch (mode)
-            {
-                case PreviewMode.Camera:
-                    return "camera";
-                case PreviewMode.LandmarksOnly:
-                    return "landmarksOnly";
-                default:
-                    return "cameraWithLandmarks";
-            }
-        }
-
         // Outline topology for the 66-point landmark model: the iBUG 68-point layout minus the two
         // inner mouth corners, so points 0-59 are the standard ones and the inner lip is 60-65.
-        private static readonly int[][] OpenLandmarkPaths = new[]
+        private static readonly (FaceMeshStyle Style, int[] Path, bool Closed)[] LandmarkPaths = new[]
         {
-            Enumerable.Range(0, 17).ToArray(),   // jaw
-            Enumerable.Range(17, 5).ToArray(),   // right brow
-            Enumerable.Range(22, 5).ToArray(),   // left brow
-            Enumerable.Range(27, 4).ToArray(),   // nose bridge
-            Enumerable.Range(31, 5).ToArray()    // nose base
-        };
-
-        private static readonly int[][] ClosedLandmarkPaths = new[]
-        {
-            Enumerable.Range(36, 6).ToArray(),   // right eye
-            Enumerable.Range(42, 6).ToArray(),   // left eye
-            Enumerable.Range(48, 12).ToArray(),  // outer lip
-            Enumerable.Range(60, 6).ToArray()    // inner lip
+            (FaceMeshStyle.Outline, Enumerable.Range(0, 17).ToArray(), false),   // jaw
+            (FaceMeshStyle.Eyes, Enumerable.Range(17, 5).ToArray(), false),     // right brow
+            (FaceMeshStyle.Eyes, Enumerable.Range(22, 5).ToArray(), false),     // left brow
+            (FaceMeshStyle.Nose, Enumerable.Range(27, 4).ToArray(), false),     // nose bridge
+            (FaceMeshStyle.Nose, Enumerable.Range(31, 5).ToArray(), false),     // nose base
+            (FaceMeshStyle.Eyes, Enumerable.Range(36, 6).ToArray(), true),      // right eye
+            (FaceMeshStyle.Eyes, Enumerable.Range(42, 6).ToArray(), true),      // left eye
+            (FaceMeshStyle.Lips, Enumerable.Range(48, 12).ToArray(), true),     // outer lip
+            (FaceMeshStyle.Lips, Enumerable.Range(60, 6).ToArray(), true)       // inner lip
         };
 
         private const int OutlineLandmarkCount = 66;
 
         /// <summary>
-        /// Build the preview panel image for one camera frame according to the selected preview mode.
-        /// Camera: the frame as-is. CameraWithLandmarks: the frame with the face box and mesh drawn over it.
-        /// LandmarksOnly: the face box and mesh on a black canvas the same size as the frame.
+        /// Build the preview mesh for one PC-tracked camera frame: the face box plus the landmark
+        /// outline, normalised to the frame size. Only the JPEG header is read for the size; the
+        /// pixels are never decoded here, the tracker already did that on its own thread.
         /// </summary>
-        private static Bitmap BuildPreviewBitmap(byte[] frameData, HeadPose? pose, PreviewMode mode)
+        private static FaceMeshFrame? BuildMeshFromPose(byte[] frameData, HeadPose? pose)
         {
             if (frameData == null || frameData.Length == 0)
             {
-                throw new ArgumentException("Frame data is empty", nameof(frameData));
+                return null;
             }
 
-            var haveFace = pose != null && pose.FaceBox != null;
-
-            if (mode == PreviewMode.LandmarksOnly)
+            if (pose == null)
             {
-                return DrawLandmarksOnly(frameData, haveFace ? pose : null);
+                return null;
             }
 
-            if (mode == PreviewMode.CameraWithLandmarks && haveFace)
-            {
-                return DrawOverlays(frameData, pose!);
-            }
-
-            using (var ms = new MemoryStream(frameData))
-            {
-                return new Bitmap(ms);
-            }
-        }
-
-        private static Bitmap DrawOverlays(byte[] frameData, HeadPose pose)
-        {
-            if (frameData == null || pose == null)
-            {
-                throw new ArgumentNullException(frameData == null ? nameof(frameData) : nameof(pose));
-            }
-
+            int width = 640;
+            int height = 480;
             try
             {
-                using (var image = SixLabors.ImageSharp.Image.Load<Rgb24>(frameData))
+                var info = SixLabors.ImageSharp.Image.Identify(frameData);
+                if (info != null && info.Width > 0 && info.Height > 0)
                 {
-                    image.Mutate(ctx => DrawFaceOverlay(ctx, pose));
-                    return ToAvaloniaBitmap(image);
+                    width = info.Width;
+                    height = info.Height;
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[DesktopApp] Error drawing overlays: {ex.Message}");
-                // Return original frame if overlay fails
-                using (var ms = new MemoryStream(frameData))
+                Debug.WriteLine($"[DesktopApp] BuildMeshFromPose: could not read frame size, assuming {width}x{height}: {ex.Message}");
+            }
+
+            var groups = new List<FaceMeshGroup>();
+            var sx = 1f / width;
+            var sy = 1f / height;
+
+            var box = pose.FaceBox;
+            if (box != null)
+            {
+                var x0 = box.X * sx;
+                var y0 = box.Y * sy;
+                var x1 = (box.X + box.Width) * sx;
+                var y1 = (box.Y + box.Height) * sy;
+                groups.Add(new FaceMeshGroup(FaceMeshStyle.FaceBox, 2f, new[]
                 {
-                    return new Bitmap(ms);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Draw the face box and mesh on a black canvas sized like the frame, without decoding the frame's pixels.
-        /// </summary>
-        private static Bitmap DrawLandmarksOnly(byte[] frameData, HeadPose? pose)
-        {
-            if (frameData == null)
-            {
-                throw new ArgumentNullException(nameof(frameData));
-            }
-
-            // Identify reads only the header, so this is far cheaper than decoding the JPEG
-            var info = SixLabors.ImageSharp.Image.Identify(frameData);
-            var width = info?.Width ?? 640;
-            var height = info?.Height ?? 480;
-
-            using (var image = new Image<Rgb24>(width, height, new Rgb24(0, 0, 0)))
-            {
-                if (pose != null)
-                {
-                    image.Mutate(ctx => DrawFaceOverlay(ctx, pose));
-                }
-
-                return ToAvaloniaBitmap(image);
-            }
-        }
-
-        private static Bitmap ToAvaloniaBitmap(Image<Rgb24> image)
-        {
-            if (image == null)
-            {
-                throw new ArgumentNullException(nameof(image));
-            }
-
-            using (var ms = new MemoryStream())
-            {
-                image.SaveAsJpeg(ms);
-                ms.Position = 0;
-                return new Bitmap(ms);
-            }
-        }
-
-        /// <summary>
-        /// Draw the face box (green) and the landmark outline (cyan lines, red points).
-        /// Falls back to plain dots when the landmark set is not the 66-point layout.
-        /// </summary>
-        private static void DrawFaceOverlay(IImageProcessingContext ctx, HeadPose pose)
-        {
-            if (ctx == null || pose == null)
-            {
-                return;
-            }
-
-            if (pose.FaceBox != null)
-            {
-                var faceBox = pose.FaceBox;
-                var rect = new RectangleF(faceBox.X, faceBox.Y, faceBox.Width, faceBox.Height);
-                ctx.Draw(SixLabors.ImageSharp.Color.Lime, 2f, rect);
+                    x0, y0, x1, y0,
+                    x1, y0, x1, y1,
+                    x1, y1, x0, y1,
+                    x0, y1, x0, y0
+                }));
             }
 
             var landmarks = pose.Landmarks;
-            if (landmarks == null || landmarks.Length == 0)
+            if (landmarks != null && landmarks.Length >= OutlineLandmarkCount)
             {
-                return;
-            }
-
-            if (landmarks.Length < OutlineLandmarkCount)
-            {
-                Debug.WriteLine($"[DesktopApp] DrawFaceOverlay: {landmarks.Length} landmarks, drawing dots only");
-                foreach (var landmark in landmarks)
+                foreach (var (style, path, closed) in LandmarkPaths)
                 {
-                    ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(new PointF(landmark.X, landmark.Y), 3f));
+                    var segmentCount = closed ? path.Length : path.Length - 1;
+                    var segments = new float[segmentCount * 4];
+                    for (int i = 0; i < segmentCount; i++)
+                    {
+                        var a = landmarks[path[i]];
+                        var b = landmarks[path[(i + 1) % path.Length]];
+                        segments[i * 4] = a.X * sx;
+                        segments[i * 4 + 1] = a.Y * sy;
+                        segments[i * 4 + 2] = b.X * sx;
+                        segments[i * 4 + 3] = b.Y * sy;
+                    }
+                    groups.Add(new FaceMeshGroup(style, 1.5f, segments));
                 }
-                return;
+            }
+            else if (landmarks != null && landmarks.Length > 0)
+            {
+                // Unknown layout: tiny crosses at each point so something still shows
+                Debug.WriteLine($"[DesktopApp] BuildMeshFromPose: {landmarks.Length} landmarks, drawing points only");
+                var segments = new float[landmarks.Length * 8];
+                const float Half = 0.004f;
+                for (int i = 0; i < landmarks.Length; i++)
+                {
+                    var x = landmarks[i].X * sx;
+                    var y = landmarks[i].Y * sy;
+                    segments[i * 8] = x - Half;
+                    segments[i * 8 + 1] = y;
+                    segments[i * 8 + 2] = x + Half;
+                    segments[i * 8 + 3] = y;
+                    segments[i * 8 + 4] = x;
+                    segments[i * 8 + 5] = y - Half;
+                    segments[i * 8 + 6] = x;
+                    segments[i * 8 + 7] = y + Half;
+                }
+                groups.Add(new FaceMeshGroup(FaceMeshStyle.Lips, 1.5f, segments));
             }
 
-            var outline = SixLabors.ImageSharp.Color.Cyan;
-            foreach (var path in OpenLandmarkPaths)
+            if (groups.Count == 0)
             {
-                ctx.DrawLine(outline, 1.5f, ToPoints(landmarks, path));
+                return null;
             }
 
-            foreach (var path in ClosedLandmarkPaths)
-            {
-                ctx.DrawPolygon(outline, 1.5f, ToPoints(landmarks, path));
-            }
-
-            foreach (var landmark in landmarks)
-            {
-                ctx.Fill(SixLabors.ImageSharp.Color.Red, new EllipsePolygon(new PointF(landmark.X, landmark.Y), 2f));
-            }
-        }
-
-        private static PointF[] ToPoints(LandmarkPoint[] landmarks, int[] indices)
-        {
-            var points = new PointF[indices.Length];
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var lm = landmarks[indices[i]];
-                points[i] = new PointF(lm.X, lm.Y);
-            }
-            return points;
+            return new FaceMeshFrame(width, height, groups.ToArray());
         }
 
         private async Task<ServerConfig?> LoadConfigurationAsync()
@@ -1193,7 +1113,6 @@ namespace EDSC.Desktop
             }
 
             httpServer.PreviewEnabled = _connectionViewModel?.ShowPcPreview ?? true;
-            httpServer.PreviewMode = ToPhonePreviewMode(_connectionViewModel?.PreviewMode ?? PreviewMode.CameraWithLandmarks);
 
             httpServer.PoseDetected += (sender, pose) =>
             {
@@ -1206,30 +1125,45 @@ namespace EDSC.Desktop
                 _lastPose = null;
             };
 
-            // Phone-side tracking sends a small preview with its mesh already drawn; show it as-is
-            httpServer.PreviewFrameReceived += (sender, frameData) =>
+            // Phone-side tracking sends its mesh as line segments; hand the newest one to the panel.
+            // Frames arrive at camera rate, so keep only the latest and post one UI update at a time:
+            // if the UI thread is busy the queue never grows, it just skips to the freshest mesh.
+            httpServer.PhoneMeshReceived += (sender, frame) =>
             {
-                Dispatcher.UIThread.InvokeAsync(() =>
+                var viewModel = _connectionViewModel;
+                if (viewModel == null || !viewModel.ShowPcPreview || frame == null)
                 {
+                    return;
+                }
+
+                Interlocked.Exchange(ref _pendingMesh, frame);
+                if (Interlocked.Exchange(ref _meshUpdateQueued, 1) == 1)
+                {
+                    return;
+                }
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    Interlocked.Exchange(ref _meshUpdateQueued, 0);
+                    var latest = Interlocked.Exchange(ref _pendingMesh, null);
+                    if (latest == null)
+                    {
+                        return;
+                    }
+
                     try
                     {
-                        var viewModel = _connectionViewModel;
-                        if (viewModel == null || !viewModel.ShowPcPreview)
+                        var vm = _connectionViewModel;
+                        if (vm == null || !vm.ShowPcPreview)
                         {
                             return;
                         }
 
-                        Bitmap bitmap;
-                        using (var ms = new MemoryStream(frameData))
-                        {
-                            bitmap = new Bitmap(ms);
-                        }
-
-                        viewModel.UpdateVideoFrame(bitmap, 0, null, preserveStatus: true);
+                        vm.UpdateMesh(latest, 0, null, preserveStatus: true);
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"[DesktopApp] Error showing phone preview: {ex.Message}");
+                        Debug.WriteLine($"[DesktopApp] Error showing phone mesh: {ex.Message}");
                     }
                 });
             };
@@ -1262,6 +1196,12 @@ namespace EDSC.Desktop
 
                         viewModel.UpdatePhoneTracking(text, rate);
 
+                        if (pose == null && viewModel.HasMeshFrame)
+                        {
+                            // Face lost: the phone stops sending meshes, so clear the stale one
+                            viewModel.UpdateMesh(null, 0, null, preserveStatus: true);
+                        }
+
                         if (_poseRouter != null)
                         {
                             viewModel.DirectOutputStatus = _poseRouter.Status;
@@ -1291,18 +1231,27 @@ namespace EDSC.Desktop
 
                             if (!viewModel.ShowPcPreview)
                             {
-                                // Keep the status line alive without decoding the frame
-                                viewModel.UpdateVideoFrame(null, 0, null, preserveStatus: true);
+                                // Keep the status line alive without touching the frame
+                                viewModel.UpdateMesh(null, 0, null, preserveStatus: true);
                                 viewModel.ShowVideoPreview = true;
                                 viewModel.VideoStatusText = _faceTrackingService?.LastStatus ?? "Tracking (preview off)";
                                 viewModel.VideoFps = httpServer.GetCurrentFps().ToString("F1");
                                 return;
                             }
 
-                            var bitmap = BuildPreviewBitmap(frameData, _lastPose, viewModel.PreviewMode);
-
+                            var mesh = BuildMeshFromPose(frameData, _lastPose);
                             var fps = httpServer.GetCurrentFps();
-                            viewModel.UpdateVideoFrame(bitmap, fps, _faceTrackingService?.LastStatus);
+                            if (mesh == null)
+                            {
+                                // No face this frame: show an empty panel but keep the status and rate ticking
+                                viewModel.UpdateMesh(null, 0, null, preserveStatus: true);
+                                viewModel.ShowVideoPreview = true;
+                                viewModel.VideoStatusText = _faceTrackingService?.LastStatus ?? "Tracking";
+                                viewModel.VideoFps = fps.ToString("F1");
+                                return;
+                            }
+
+                            viewModel.UpdateMesh(mesh, fps, _faceTrackingService?.LastStatus);
 
                             if (_poseRouter != null)
                             {

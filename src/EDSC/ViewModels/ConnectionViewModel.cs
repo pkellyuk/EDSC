@@ -23,7 +23,7 @@ namespace EDSC.ViewModels
 
         // Video tracking properties
         private bool _showVideoPreview;
-        private Bitmap? _videoFrameImage;
+        private FaceMeshFrame? _meshFrame;
         private string _videoStatusText;
         private string _videoFps;
         private double _translationScale;
@@ -32,9 +32,8 @@ namespace EDSC.ViewModels
         private double _rollScale;
         private double _smoothingStrength;
 
-        // Preview mode (what the desktop preview panel shows)
-        private PreviewMode _previewMode = PreviewMode.CameraWithLandmarks;
-        private PreviewModeOption? _selectedPreviewModeOption;
+        // Whether the desktop preview panel draws the face mesh
+        private bool _showPcPreview = true;
 
         // Pose output properties
         private bool _directOutputEnabled;
@@ -198,44 +197,47 @@ namespace EDSC.ViewModels
             }
         }
 
-        private bool _hasVideoFrame;
+        private bool _hasMeshFrame;
 
         /// <summary>
-        /// True while actual video frames are arriving; false when only poses arrive from the phone.
+        /// True while face mesh frames are arriving for the preview panel; false when only poses arrive.
         /// </summary>
-        public bool HasVideoFrame
+        public bool HasMeshFrame
         {
             get
             {
-                return _hasVideoFrame;
+                return _hasMeshFrame;
             }
             set
             {
-                if (_hasVideoFrame == value)
+                if (_hasMeshFrame == value)
                 {
                     return;
                 }
 
-                _hasVideoFrame = value;
-                OnPropertyChanged(nameof(HasVideoFrame));
+                _hasMeshFrame = value;
+                OnPropertyChanged(nameof(HasMeshFrame));
             }
         }
 
-        public Bitmap? VideoFrameImage
+        /// <summary>
+        /// The latest face mesh for the preview panel, drawn by the FaceMeshView control.
+        /// </summary>
+        public FaceMeshFrame? MeshFrame
         {
             get
             {
-                return _videoFrameImage;
+                return _meshFrame;
             }
             set
             {
-                if (_videoFrameImage == value)
+                if (ReferenceEquals(_meshFrame, value))
                 {
                     return;
                 }
 
-                _videoFrameImage = value;
-                OnPropertyChanged(nameof(VideoFrameImage));
+                _meshFrame = value;
+                OnPropertyChanged(nameof(MeshFrame));
             }
         }
 
@@ -374,81 +376,25 @@ namespace EDSC.ViewModels
         }
 
         /// <summary>
-        /// The choices offered by the preview mode dropdown, in display order.
-        /// </summary>
-        public ObservableCollection<PreviewModeOption> PreviewModeOptions { get; } = new ObservableCollection<PreviewModeOption>
-        {
-            new PreviewModeOption(PreviewMode.Off, "Off (saves CPU; phone stops sending preview)"),
-            new PreviewModeOption(PreviewMode.Camera, "Camera only"),
-            new PreviewModeOption(PreviewMode.CameraWithLandmarks, "Camera with face mesh"),
-            new PreviewModeOption(PreviewMode.LandmarksOnly, "Face mesh only (no camera image)")
-        };
-
-        /// <summary>
-        /// The dropdown's selected entry. Bound by the view; changes flow through to <see cref="PreviewMode"/>.
-        /// </summary>
-        public PreviewModeOption? SelectedPreviewModeOption
-        {
-            get
-            {
-                return _selectedPreviewModeOption;
-            }
-            set
-            {
-                if (value == null || ReferenceEquals(_selectedPreviewModeOption, value))
-                {
-                    return;
-                }
-
-                Debug.WriteLine($"[ConnectionViewModel] SelectedPreviewModeOption -> {value.Mode}");
-                _selectedPreviewModeOption = value;
-                OnPropertyChanged(nameof(SelectedPreviewModeOption));
-                PreviewMode = value.Mode;
-            }
-        }
-
-        /// <summary>
-        /// What the desktop preview panel shows. Setting it also updates the dropdown selection.
-        /// </summary>
-        public PreviewMode PreviewMode
-        {
-            get
-            {
-                return _previewMode;
-            }
-            set
-            {
-                if (_previewMode == value)
-                {
-                    return;
-                }
-
-                Debug.WriteLine($"[ConnectionViewModel] PreviewMode {_previewMode} -> {value}");
-                _previewMode = value;
-                OnPropertyChanged(nameof(PreviewMode));
-                OnPropertyChanged(nameof(ShowPcPreview));
-
-                foreach (var option in PreviewModeOptions)
-                {
-                    if (option.Mode != value)
-                    {
-                        continue;
-                    }
-
-                    SelectedPreviewModeOption = option;
-                    break;
-                }
-            }
-        }
-
-        /// <summary>
-        /// True when the preview panel shows anything at all (any mode other than Off).
+        /// True to draw the face mesh in the desktop preview panel. Off saves a little CPU on the PC
+        /// and tells the phone to stop sending mesh frames. The camera image never reaches the panel.
         /// </summary>
         public bool ShowPcPreview
         {
             get
             {
-                return _previewMode != PreviewMode.Off;
+                return _showPcPreview;
+            }
+            set
+            {
+                if (_showPcPreview == value)
+                {
+                    return;
+                }
+
+                Debug.WriteLine($"[ConnectionViewModel] ShowPcPreview {_showPcPreview} -> {value}");
+                _showPcPreview = value;
+                OnPropertyChanged(nameof(ShowPcPreview));
             }
         }
 
@@ -701,8 +647,7 @@ namespace EDSC.ViewModels
 
             // Initialize video tracking properties
             _showVideoPreview = false;
-            _selectedPreviewModeOption = PreviewModeOptions[2];   // CameraWithLandmarks, matching _previewMode's default
-            _videoFrameImage = null;
+            _meshFrame = null;
             _videoStatusText = "Waiting for video stream...";
             _videoFps = "0.0";
             _translationScale = 1.0;
@@ -767,16 +712,19 @@ namespace EDSC.ViewModels
             }
         }
 
-        /// <param name="frameImage">Frame to show.</param>
+        /// <summary>
+        /// Show a face mesh frame in the preview panel, or clear it with null.
+        /// </summary>
+        /// <param name="frame">Mesh to draw, or null to clear the panel.</param>
         /// <param name="fps">Frame rate to display.</param>
         /// <param name="trackingStatus">Status line to show, or null for the default.</param>
-        /// <param name="preserveStatus">True to update only the image, leaving the status line and rate alone.</param>
-        public void UpdateVideoFrame(Bitmap? frameImage, double fps, string? trackingStatus = null, bool preserveStatus = false)
+        /// <param name="preserveStatus">True to update only the mesh, leaving the status line and rate alone.</param>
+        public void UpdateMesh(FaceMeshFrame? frame, double fps, string? trackingStatus = null, bool preserveStatus = false)
         {
-            VideoFrameImage = frameImage;
-            HasVideoFrame = frameImage != null;
+            MeshFrame = frame;
+            HasMeshFrame = frame != null;
 
-            if (frameImage == null)
+            if (frame == null)
             {
                 return;
             }
@@ -808,8 +756,8 @@ namespace EDSC.ViewModels
         public void HideVideoPreview()
         {
             ShowVideoPreview = false;
-            VideoFrameImage = null;
-            HasVideoFrame = false;
+            MeshFrame = null;
+            HasMeshFrame = false;
             VideoFps = "0.0";
             VideoStatusText = "Waiting for video stream...";
         }
@@ -830,27 +778,6 @@ namespace EDSC.ViewModels
             }
 
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
-    }
-
-    /// <summary>
-    /// One entry in the preview mode dropdown: the mode plus its display text.
-    /// </summary>
-    public class PreviewModeOption
-    {
-        public PreviewModeOption(PreviewMode mode, string label)
-        {
-            Mode = mode;
-            Label = label ?? mode.ToString();
-        }
-
-        public PreviewMode Mode { get; }
-
-        public string Label { get; }
-
-        public override string ToString()
-        {
-            return Label;
         }
     }
 }
