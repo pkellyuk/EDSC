@@ -1978,7 +1978,8 @@ namespace EDSC.Desktop.Services
       camInfo: '',
       lastReadoutAt: 0,
       overlayClear: true,
-      pendingGaze: null
+      pendingGaze: null,
+      blinking: false
     };
 
     // Phone-side performance choices, remembered per device. The camera size feeds MediaPipe's
@@ -2155,7 +2156,7 @@ namespace EDSC.Desktop.Services
     const IRIS_CENTRES = [468, 473];
     const EYE_ANGLE_GAIN = 2.4;
     const EYE_CLOSED_RATIO = 0.12;          // lid gap / width: definitely shut, before a baseline exists
-    const EYE_BLINK_FRACTION = 0.75;        // of the learned open baseline; below this the eye is blinking
+    const EYE_BLINK_FRACTION = 0.8;         // of the learned open baseline; below this the eye is blinking
     const EYE_BASELINE_RATE = 0.02;         // per frame; the baseline follows slow changes only
     const EYE_SETTLE_MS = 150;              // ignore an eye for this long after a blink ends
     const GAZE_RAY_PX_PER_DEG = 1.6;        // drawn ray length per degree, at 480 px frame width
@@ -2187,6 +2188,11 @@ namespace EDSC.Desktop.Services
     }
 
     function computeGaze(landmarks, w, h) {
+      // phoneTracker.blinking is set as a side effect: true while any eye is closing, shut or
+      // still settling after reopening. It goes to the PC so head pitch can be held through the
+      // blink, because the head matrix is fitted to the eye landmarks too and tilts a little
+      // as the lids move.
+      phoneTracker.blinking = false;
       if (!landmarks || landmarks.length < 478 || !w || !h) {
         return null;
       }
@@ -2246,9 +2252,11 @@ namespace EDSC.Desktop.Services
         const blinking = openness < EYE_CLOSED_RATIO || (state.baseline > 0 && openness < state.baseline * EYE_BLINK_FRACTION);
         if (blinking) {
           state.blockedUntil = now + EYE_SETTLE_MS;
+          phoneTracker.blinking = true;
           continue;
         }
         if (now < state.blockedUntil) {
+          phoneTracker.blinking = true;
           continue;
         }
         // Learn how open this eye normally is; a first reading seeds it, then it drifts slowly
@@ -2586,6 +2594,9 @@ namespace EDSC.Desktop.Services
           msg.gy = Math.round(gaze.yaw * 10) / 10;
           msg.gp = Math.round(gaze.pitch * 10) / 10;
         }
+        if (phoneTracker.blinking) {
+          msg.bl = 1;
+        }
         sendPhoneMessage(msg);
         phoneTracker.lostSent = false;
         updatePhoneFps();
@@ -2599,7 +2610,7 @@ namespace EDSC.Desktop.Services
           const noseText = nose ? ('nose in frame ' + Math.round(nose.x * 100) + '%, ' + Math.round(nose.y * 100) + '%') : '';
           const gazeText = gaze
             ? ('eyes yaw ' + gaze.yaw.toFixed(1).padStart(6) + '°   pitch ' + gaze.pitch.toFixed(1).padStart(6) + '°')
-            : 'eyes closed';
+            : (phoneTracker.blinking ? 'blink' : 'eyes closed');
           readout.textContent =
             'yaw ' + pose.yaw.toFixed(1).padStart(6) + '°   pitch ' + pose.pitch.toFixed(1).padStart(6) + '°   roll ' + pose.roll.toFixed(1).padStart(6) + '°\n' +
             'x   ' + pose.x.toFixed(1).padStart(6) + 'cm  y     ' + pose.y.toFixed(1).padStart(6) + 'cm  z    ' + pose.z.toFixed(1).padStart(6) + 'cm\n' +
@@ -3412,6 +3423,9 @@ namespace EDSC.Desktop.Services
                 {
                     return null;
                 }
+
+                // bl:1 while an eye is closing, shut or just reopened
+                pose.Blinking = root.TryGetProperty("bl", out var blink) && blink.ValueKind == JsonValueKind.Number;
 
                 // Eye gaze relative to the head; the phone leaves it out while the eyes are closed
                 var gazeYaw = Read("gy");

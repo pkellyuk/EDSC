@@ -51,6 +51,9 @@ namespace EDSC.Services
         /// <summary>Eye gaze relative to the head in degrees, positive when looking up. Valid when <see cref="HasGaze"/>.</summary>
         public double GazePitch { get; set; }
 
+        /// <summary>True while the tracker sees an eye closing, closed or just reopened. Head pitch is unreliable then.</summary>
+        public bool Blinking { get; set; }
+
         public override string ToString()
         {
             return $"X={X:F2}, Y={Y:F2}, Z={Z:F2}, Yaw={Yaw:F2}, Pitch={Pitch:F2}, Roll={Roll:F2}";

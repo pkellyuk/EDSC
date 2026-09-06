@@ -81,6 +81,16 @@ namespace EDSC.Desktop.Services
         // real glance settles in about a quarter of a second; the residue of a blink, a frame or
         // two of pulled iris either side of the hold, is mostly averaged away.
         private const double GazeCutoffHz = 1.5;
+
+        // Blink hold. The phone flags frames where an eye is closing, shut or just reopened; the
+        // head matrix is fitted to the eye landmarks too, so pitch dips a little on every blink.
+        // Pitch is held at the last clean value for those frames and blended back afterwards.
+        private const double BlinkBlendSeconds = 0.15;
+        private bool _blinkActive;
+        private bool _haveCleanPitch;
+        private double _lastCleanPitch;
+        private double _blinkHeldPitch;
+        private double _blinkEndedAt = -1.0;
         private readonly OneEuroFilter _gazeYawFilter = new OneEuroFilter(GazeCutoffHz, 0.0);
         private readonly OneEuroFilter _gazePitchFilter = new OneEuroFilter(GazeCutoffHz, 0.0);
         private bool _haveGaze;
@@ -169,6 +179,78 @@ namespace EDSC.Desktop.Services
             }
 
             return Math.Sign(gazeDegrees) * (magnitude - GazeDeadZoneDegrees) * _gazeNudge;
+        }
+
+        /// <summary>
+        /// Hold head pitch through a blink and blend it back afterwards. Returns the pose to use.
+        /// Called under the lock.
+        /// </summary>
+        private HeadPose ApplyBlinkHold(HeadPose pose, double now)
+        {
+            if (pose == null)
+            {
+                throw new ArgumentNullException(nameof(pose));
+            }
+
+            if (pose.Blinking)
+            {
+                if (!_haveCleanPitch)
+                {
+                    return pose;
+                }
+
+                if (!_blinkActive)
+                {
+                    _blinkActive = true;
+                    _blinkHeldPitch = _lastCleanPitch;
+                    _blinkEndedAt = -1.0;
+                    Debug.WriteLine($"[PoseOutputRouter] Blink: holding pitch at {_blinkHeldPitch:F2}");
+                }
+
+                return WithPitch(pose, _blinkHeldPitch);
+            }
+
+            if (_blinkActive)
+            {
+                _blinkActive = false;
+                _blinkEndedAt = now;
+            }
+
+            _lastCleanPitch = pose.Pitch;
+            _haveCleanPitch = true;
+
+            if (_blinkEndedAt < 0)
+            {
+                return pose;
+            }
+
+            var fraction = (now - _blinkEndedAt) / BlinkBlendSeconds;
+            if (fraction >= 1.0)
+            {
+                _blinkEndedAt = -1.0;
+                return pose;
+            }
+
+            return WithPitch(pose, _blinkHeldPitch + (pose.Pitch - _blinkHeldPitch) * fraction);
+        }
+
+        private static HeadPose WithPitch(HeadPose pose, double pitch)
+        {
+            return new HeadPose
+            {
+                X = pose.X,
+                Y = pose.Y,
+                Z = pose.Z,
+                Yaw = pose.Yaw,
+                Pitch = pitch,
+                Roll = pose.Roll,
+                FaceBox = pose.FaceBox,
+                Landmarks = pose.Landmarks,
+                HasGaze = pose.HasGaze,
+                GazeYaw = pose.GazeYaw,
+                GazePitch = pose.GazePitch,
+                Blinking = pose.Blinking
+            };
         }
 
         /// <summary>
@@ -407,6 +489,7 @@ namespace EDSC.Desktop.Services
             {
                 direct = _directOutputEnabled;
                 HoldGaze(pose);
+                pose = ApplyBlinkHold(pose, now);
 
                 if (direct && (_centerPending || _center == null))
                 {
