@@ -16,6 +16,20 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 - Phone browser sends button presses, which the desktop app turns into keypresses in the game
 - Optionally the phone runs face tracking and sends head pose to the PC, which feeds it to the game
 
+## Screenshots
+
+**Desktop, Tracking tab.** IP selection and QR code, sensitivity and output settings, and the face mesh preview.
+
+![EDSC desktop app, Tracking tab](docs/images/desktop-tracking.png)
+
+**Desktop, Buttons tab.** The drag-and-drop layout editor, here with a Star Citizen layout built from the game's own key bindings.
+
+![EDSC desktop app, Buttons tab](docs/images/desktop-buttons.png)
+
+**Phone, cockpit page.** Categories around the edges, the selected category in the centre, and the head tracking preview docked bottom-right.
+
+<img src="docs/images/phone-cockpit.jpg" alt="EDSC web control page running on a phone" width="360">
+
 ## Features
 
 - QR code web UI (no mobile app required)
