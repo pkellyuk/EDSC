@@ -7,9 +7,9 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <DefineConstants>DESKTOP</DefineConstants>
     <ApplicationIcon>Assets\edsc.ico</ApplicationIcon>
-    <Version>2.0.5</Version>
-    <AssemblyVersion>2.0.5.0</AssemblyVersion>
-    <FileVersion>2.0.5.0</FileVersion>
+    <Version>2.0.6</Version>
+    <AssemblyVersion>2.0.6.0</AssemblyVersion>
+    <FileVersion>2.0.6.0</FileVersion>
     <Product>EDSC</Product>
     <Company>EDSC</Company>
     <Description>Elite Dangerous Ship Controls</Description>
