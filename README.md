@@ -18,7 +18,7 @@ EDSC is a Windows desktop app that serves a web control panel for Elite Dangerou
 
 ## Screenshots
 
-**Desktop, Tracking tab.** IP selection and QR code, sensitivity and output settings, and the face mesh preview.
+**Desktop, Tracking tab.** IP selection and QR code, the sensitivity and eye nudge sliders, and the face mesh preview. The preview shows the iris rings and a ray from each eye, with the view window inset in the corner: green for the head, yellow for where the eyes look, white for what the game receives.
 
 ![EDSC desktop app, Tracking tab](docs/images/desktop-tracking.png)
 
